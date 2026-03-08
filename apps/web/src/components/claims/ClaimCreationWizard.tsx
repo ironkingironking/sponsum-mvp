@@ -64,10 +64,10 @@ const allEvidenceTypes: ClaimEvidenceType[] = [
 ];
 
 const steps = [
-  "Instrument waehlen",
-  "Claim Target waehlen",
-  "Blueprint waehlen",
-  "Claim ausfuellen",
+  "Instrument wählen",
+  "Claim-Ziel wählen",
+  "Blueprint wählen",
+  "Claim ausfüllen",
   "Evidence/Remedies",
   "Review & Submit"
 ];
@@ -162,7 +162,7 @@ export function ClaimCreationWizard({ onClaimCreated }: ClaimCreationWizardProps
       instrumentId: context.id,
       claimType: selectedBlueprint?.defaultClaimType || "custom",
       category: selectedBlueprint?.defaultCategory || "custom",
-      title: title || selectedBlueprint?.label || "Custom Claim",
+      title: title || selectedBlueprint?.label || "Eigener Claim",
       summary: summary || selectedBlueprint?.description || "",
       statementByClaimant: statement || summary || "",
       amountInDispute: amount ? Number(amount) : undefined,
@@ -171,6 +171,7 @@ export function ClaimCreationWizard({ onClaimCreated }: ClaimCreationWizardProps
       status,
       severity,
       evidenceTypes: selectedEvidenceTypes,
+      requestedDeadline: requestedDeadline || undefined,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       targetType: selectedTarget?.targetType || "custom",
@@ -184,7 +185,7 @@ export function ClaimCreationWizard({ onClaimCreated }: ClaimCreationWizardProps
         templateTitle: context.template.title,
         instrumentTitle: context.title,
         createdAt: new Date().toISOString(),
-        actor: "Current User"
+        actor: "Aktueller Benutzer"
       }
     };
 
@@ -213,7 +214,7 @@ export function ClaimCreationWizard({ onClaimCreated }: ClaimCreationWizardProps
       <div className="dashboard-widget-head">
         <div>
           <h3>Claim Creation Wizard</h3>
-          <p>Instrument -> ClaimTarget -> Blueprint -> Evidence -> Snapshot -> Submit</p>
+          <p>Instrument → Claim-Ziel → Blueprint → Evidence → Snapshot → Submit</p>
         </div>
       </div>
 
@@ -283,16 +284,16 @@ export function ClaimCreationWizard({ onClaimCreated }: ClaimCreationWizardProps
             <input value={title} onChange={(event) => setTitle(event.target.value)} />
           </label>
           <label>
-            Summary
+            Zusammenfassung
             <textarea rows={3} value={summary} onChange={(event) => setSummary(event.target.value)} />
           </label>
           <label>
-            Statement by claimant
+            Erklärung der Anspruchstellerpartei
             <textarea rows={4} value={statement} onChange={(event) => setStatement(event.target.value)} />
           </label>
           <div className="grid grid-2">
             <label>
-              Amount in dispute
+              Streitwert
               <input type="number" value={amount} onChange={(event) => setAmount(event.target.value)} />
             </label>
             <label>
@@ -316,7 +317,7 @@ export function ClaimCreationWizard({ onClaimCreated }: ClaimCreationWizardProps
             </select>
           </label>
           <label>
-            Related deadline (optional)
+            Zugehörige Frist (optional)
             <input type="date" value={requestedDeadline} onChange={(event) => setRequestedDeadline(event.target.value)} />
           </label>
         </div>
@@ -381,7 +382,7 @@ export function ClaimCreationWizard({ onClaimCreated }: ClaimCreationWizardProps
 
       <div className="instrument-actions">
         <button type="button" onClick={previousStep} disabled={step === 1}>
-          Zurueck
+          Zurück
         </button>
         {step < 6 ? (
           <button type="button" onClick={nextStep}>
@@ -389,7 +390,7 @@ export function ClaimCreationWizard({ onClaimCreated }: ClaimCreationWizardProps
           </button>
         ) : (
           <button type="button" onClick={submitClaim}>
-            Claim validieren & erstellen
+            Claim validieren und erstellen
           </button>
         )}
       </div>

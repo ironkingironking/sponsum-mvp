@@ -33,7 +33,7 @@ export function DashboardHeader({ role, filters, onRoleChange, onFiltersChange }
     <header className="dashboard-header">
       <div>
         <h1>Sponsum Operations Dashboard</h1>
-        <p>Pipeline, Risiko, Settlement, Disputes und Marketplace-Aktivitaet in einer Arbeitsflaeche.</p>
+        <p>Pipeline, Risiko, Settlement, Disputes und Marketplace-Aktivität in einer Arbeitsfläche.</p>
       </div>
 
       <div className="dashboard-filter-grid">
@@ -104,7 +104,7 @@ export function DashboardHeader({ role, filters, onRoleChange, onFiltersChange }
             checked={filters.onlyMine}
             onChange={(event) => patchFilters(filters, onFiltersChange, { onlyMine: event.target.checked })}
           />
-          Nur meine Faelle
+          Nur meine Fälle
         </label>
 
         <label className="dashboard-checkbox">
@@ -113,7 +113,7 @@ export function DashboardHeader({ role, filters, onRoleChange, onFiltersChange }
             checked={filters.onlyCritical}
             onChange={(event) => patchFilters(filters, onFiltersChange, { onlyCritical: event.target.checked })}
           />
-          Nur kritische Faelle
+          Nur kritische Fälle
         </label>
       </div>
     </header>

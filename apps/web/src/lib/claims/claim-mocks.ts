@@ -132,7 +132,7 @@ const zessionContext = makeContext({
   title: "Zession Forderungspool Q3",
   observedValues: {
     gewaerleistungBestand: false,
-    benachrichtigungDrittschuldner: "keine bestaetigte Zustellung"
+    benachrichtigungDrittschuldner: "keine bestätigte Zustellung"
   },
   parties: [
     { id: "p-4", role: "zedent", displayName: "NordInvoice AG" },
@@ -276,7 +276,7 @@ const commendaContext = makeContext({
     {
       key: "monthly_reporting",
       label: "Monatliches Reporting",
-      expected: "vollstaendiger Monatsreport",
+      expected: "vollständiger Monatsreport",
       actual: "fehlend",
       partyRole: "operativerPartner"
     }
@@ -288,7 +288,7 @@ const gueltContext = makeContext({
   type: "guelt",
   title: "Gueltvertrag Bern-Land Nr. 88",
   observedValues: {
-    zahlungstermine: "Quartalsende ungehalten fuer Q2 2026"
+    zahlungstermine: "Quartalsende ungehalten für Q2 2026"
   },
   parties: [
     { id: "p-11", role: "rentenglaeubiger", displayName: "Bern Capital Cooperative" },
@@ -340,7 +340,7 @@ export const claimMocks: StructuredClaim[] = [
     category: "payment_default",
     title: "Nichtzahlung zum Verfalltag",
     summary: "Zahlung am verfalltag wurde nicht geleistet.",
-    statementByClaimant: "Die Summe war am 30.04.2026 faellig und ist nicht eingegangen.",
+    statementByClaimant: "Die Summe war am 30.04.2026 fällig und ist nicht eingegangen.",
     amountInDispute: 125000,
     currency: "CHF",
     requestedRemedy: ["payment_order", "late_fee", "escalation"],
@@ -354,6 +354,8 @@ export const claimMocks: StructuredClaim[] = [
     targetClauseBlockId: "protestverzicht",
     targetSettlementEventId: "payment_due_2026_04_30",
     targetDocumentRequirementId: "inst-wechsel-01-req-1",
+    targetRequiredDocumentType: "payment_proof",
+    targetDocumentFieldId: "verfalltag",
     targetGroupKey: "fristen",
     targetPartyRole: "bezogener",
     targetObligationKey: "payment_at_verfalltag",
@@ -394,6 +396,8 @@ export const claimMocks: StructuredClaim[] = [
     targetType: "template_field",
     targetTemplateFieldId: "avalVorhanden",
     targetDocumentRequirementId: "inst-wechsel-01-req-2",
+    targetRequiredDocumentType: "aval_certificate",
+    targetDocumentFieldId: "avalVorhanden",
     targetGroupKey: "sicherheiten",
     targetPartyRole: "aussteller",
     targetObligationKey: "aval_provision",
@@ -422,7 +426,7 @@ export const claimMocks: StructuredClaim[] = [
     claimType: "warranty_breach",
     category: "warranty_dispute",
     title: "Bestand der Forderung bestritten",
-    summary: "gewaerleistungBestand wird als verletzt geruegt.",
+    summary: "gewaerleistungBestand wird als verletzt gerügt.",
     statementByClaimant: "Die abgetretene Forderung bestand nicht in zugesicherter Form.",
     amountInDispute: 332000,
     currency: "CHF",
@@ -436,6 +440,8 @@ export const claimMocks: StructuredClaim[] = [
     targetType: "template_field",
     targetTemplateFieldId: "gewaerleistungBestand",
     targetDocumentRequirementId: "inst-zession-01-req-2",
+    targetRequiredDocumentType: "origin_document",
+    targetDocumentFieldId: "gewaerleistungBestand",
     targetClauseBlockId: "rueckgriff",
     targetGroupKey: "sicherheiten",
     targetPartyRole: "zedent",
@@ -478,6 +484,8 @@ export const claimMocks: StructuredClaim[] = [
     targetType: "uploaded_document",
     targetDocumentId: "doc-z-1",
     targetDocumentRequirementId: "inst-zession-01-req-1",
+    targetRequiredDocumentType: "assignment_document",
+    targetDocumentFieldId: "dokumentnachweise",
     targetGroupKey: "dokumente",
     targetValueSnapshot: {
       documentId: "doc-z-1",
@@ -583,7 +591,7 @@ export const claimMocks: StructuredClaim[] = [
     category: "reporting_breach",
     title: "Reportingpflicht verletzt",
     summary: "Monatsreport fehlt trotz ClauseBlock reportingpflicht.",
-    statementByClaimant: "Es wurde kein prueffaehiger Monatsreport geliefert.",
+    statementByClaimant: "Es wurde kein prüffähiger Monatsreport geliefert.",
     requestedRemedy: ["information_order", "penalty", "escalation"],
     status: "open",
     severity: "critical",
@@ -595,6 +603,8 @@ export const claimMocks: StructuredClaim[] = [
     targetClauseBlockId: "reportingpflicht",
     targetSettlementEventId: "com-reporting-2026-06",
     targetDocumentRequirementId: "inst-commenda-01-req-1",
+    targetRequiredDocumentType: "reporting_statement",
+    targetDocumentFieldId: "reportingpflichten",
     targetGroupKey: "settlement",
     targetPartyRole: "operativerPartner",
     targetObligationKey: "monthly_reporting",
@@ -604,7 +614,7 @@ export const claimMocks: StructuredClaim[] = [
       requirementStatus: "missing",
       settlementStatus: "failed"
     },
-    expectedValue: "monatlich / vollstaendig",
+    expectedValue: "monatlich / vollständig",
     actualValue: "fehlend",
     breachDetectedFrom: "rule_engine",
     sourceContext: {
@@ -624,7 +634,7 @@ export const claimMocks: StructuredClaim[] = [
     category: "payment_default",
     title: "Rentenzahlung Q2 ausgeblieben",
     summary: "Periodische Rentenzahlung nicht geleistet.",
-    statementByClaimant: "Die Rate Q2 2026 in Hoehe von 9.000 CHF fehlt.",
+    statementByClaimant: "Die Rate Q2 2026 in Höhe von 9.000 CHF fehlt.",
     amountInDispute: 9000,
     currency: "CHF",
     requestedRemedy: ["payment_order", "late_fee", "escalation"],
@@ -637,6 +647,8 @@ export const claimMocks: StructuredClaim[] = [
     targetTemplateFieldId: "zahlungstermine",
     targetSettlementEventId: "guelt-rente-2026-q2",
     targetDocumentRequirementId: "inst-guelt-01-req-1",
+    targetRequiredDocumentType: "payment_proof",
+    targetDocumentFieldId: "zahlungstermine",
     targetGroupKey: "fristen",
     targetPartyRole: "verpflichteter",
     targetObligationKey: "annuity_q2_2026",

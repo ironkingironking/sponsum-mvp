@@ -104,7 +104,7 @@ export function deriveClaimTargetCandidates(context: InstrumentContext): ClaimTa
       id: `se-${event.id}`,
       targetType: "settlement_event",
       label: `${event.eventType} (${event.obligationKey})`,
-      description: `Due ${event.dueAt} · status ${event.settlementStatus}`,
+      description: `Fällig ${event.dueAt} · Status ${event.settlementStatus}`,
       settlementEventId: event.id,
       obligationKey: event.obligationKey,
       expectedValue: {
@@ -144,6 +144,8 @@ export function deriveClaimTargetCandidates(context: InstrumentContext): ClaimTa
       label,
       description: definition?.description || requirementInstance.requirementId,
       documentRequirementId: requirementInstance.id,
+      requiredDocumentType: definition?.documentType,
+      documentFieldId: definition?.fieldIds?.[0],
       expectedValue: definition?.documentType,
       actualValue: requirementInstance.status,
       snapshot: {
@@ -256,6 +258,8 @@ export function attachTargetToClaimDraft(claim: StructuredClaim, target: ClaimTa
     targetClauseBlockId: target.clauseBlockId,
     targetSettlementEventId: target.settlementEventId,
     targetDocumentRequirementId: target.documentRequirementId,
+    targetRequiredDocumentType: target.requiredDocumentType,
+    targetDocumentFieldId: target.documentFieldId,
     targetDocumentId: target.documentId,
     targetGroupKey: target.groupKey,
     targetPartyRole: target.partyRole,

@@ -18,7 +18,7 @@ export function ClaimBlueprintSelector({ blueprints, selectedBlueprintId, onSele
         onClick={() => onSelect("custom")}
       >
         <div>
-          <strong>Custom Claim</strong>
+          <strong>Eigener Claim</strong>
           <p>Eigene Claim-Definition ohne Blueprint.</p>
         </div>
       </button>
@@ -33,7 +33,7 @@ export function ClaimBlueprintSelector({ blueprints, selectedBlueprintId, onSele
             <strong>{blueprint.label}</strong>
             <p>{blueprint.description}</p>
             <p>
-              target: {blueprint.compatibleTargetTypes.join(", ")} · remedies: {blueprint.suggestedRemedies.join(", ")}
+              Zieltypen: {blueprint.compatibleTargetTypes.join(", ")} · Remedies: {blueprint.suggestedRemedies.join(", ")}
             </p>
           </div>
           <span style={{ color: severityToColor(blueprint.severity), fontWeight: 700 }}>{blueprint.severity}</span>

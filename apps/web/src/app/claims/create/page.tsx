@@ -1,37 +1,71 @@
-import Link from "next/link";
-import { CORE_TEMPLATES } from "@sponsum/shared";
-import { Card, SectionTitle } from "@sponsum/ui";
-import { CreateClaimForm } from "@/components/CreateClaimForm";
+"use client";
 
-export default function CreateClaimPage({ searchParams }: { searchParams?: { template?: string } }) {
-  const selectedTemplate = CORE_TEMPLATES.find((tpl) => tpl.id === searchParams?.template);
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { Card, SectionTitle } from "@sponsum/ui";
+import { ClaimCreationWizard } from "@/components/claims/ClaimCreationWizard";
+import { getStoredSession, subscribeToAuthChanges } from "@/lib/auth";
+import type { StructuredClaim } from "@/lib/claims";
+
+export default function CreateClaimPage() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [lastCreatedClaimId, setLastCreatedClaimId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const updateAuth = () => setIsAuthenticated(Boolean(getStoredSession()?.token));
+    updateAuth();
+    return subscribeToAuthChanges(updateAuth);
+  }, []);
 
   return (
     <div className="grid" style={{ gap: 16 }}>
       <Card>
         <SectionTitle
-          title="Create Claim"
-          subtitle="Template selection is part of the wizard. Choose a template first, then complete the draft form."
+          title="Claim-Erstellung"
+          subtitle="Strukturierte Claims mit Referenzen auf Template-Felder, Klauselblöcke, Settlement-Events und Dokumentpflichten."
         />
-        <div style={{ display: "flex", gap: 10 }}>
-          <Link href="/claims/create/wizard/1"><button style={{ background: "#2563eb" }}>Open Template Wizard</button></Link>
-          {selectedTemplate ? <Link href={`/claims/create/wizard/1?template=${selectedTemplate.id}`}><button>Change Template</button></Link> : null}
-        </div>
-        <p style={{ color: "#475569", marginTop: 12 }}>
-          Selected template: {selectedTemplate?.title || "None selected yet. Start with the wizard."}
-        </p>
+        {!isAuthenticated ? (
+          <p style={{ margin: 0, color: "#475569" }}>
+            Für die Claim-Erstellung ist ein Login erforderlich.
+          </p>
+        ) : (
+          <p style={{ margin: 0, color: "#475569" }}>
+            Schrittweise Erstellung mit Snapshot-Logik und Blueprint-basierten Vorschlägen.
+          </p>
+        )}
       </Card>
-      {selectedTemplate ? (
+
+      {!isAuthenticated ? (
         <Card>
-          <CreateClaimForm initialTemplateId={selectedTemplate.id} />
+          <p style={{ margin: "0 0 10px", color: "#334155" }}>
+            Ohne aktive Session ist das Erstellen von Claims deaktiviert.
+          </p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Link href="/auth/login">
+              <button type="button">Zum Login</button>
+            </Link>
+            <Link href="/auth/register">
+              <button type="button">Registrieren</button>
+            </Link>
+          </div>
         </Card>
-      ) : (
+      ) : null}
+
+      {isAuthenticated ? (
+        <ClaimCreationWizard
+          onClaimCreated={(claim: StructuredClaim) => {
+            setLastCreatedClaimId(claim.id);
+          }}
+        />
+      ) : null}
+
+      {lastCreatedClaimId ? (
         <Card>
-          <p style={{ color: "#475569", margin: 0 }}>
-            Please choose a template in the wizard before creating a claim.
+          <p style={{ margin: 0, color: "#166534" }}>
+            Claim erfolgreich erstellt: <strong>{lastCreatedClaimId}</strong>
           </p>
         </Card>
-      )}
+      ) : null}
     </div>
   );
 }

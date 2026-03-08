@@ -8,9 +8,9 @@ type RecentInstrumentsTableProps = {
 
 export function RecentInstrumentsTable({ instruments }: RecentInstrumentsTableProps) {
   return (
-    <WidgetCard title="Recent Instruments" subtitle="Kompakte Uebersicht der letzten Instrument-Aktivitaeten">
+    <WidgetCard title="Recent Instruments" subtitle="Kompakte Übersicht der letzten Instrument-Aktivitäten">
       {instruments.length === 0 ? (
-        <p className="dashboard-empty">Keine Instrumente fuer den aktuellen Filter.</p>
+        <p className="dashboard-empty">Keine Instrumente für den aktuellen Filter.</p>
       ) : (
         <div className="dashboard-table-wrap">
           <table className="dashboard-table">
@@ -20,10 +20,10 @@ export function RecentInstrumentsTable({ instruments }: RecentInstrumentsTablePr
                 <th>Typ</th>
                 <th>Gegenpartei</th>
                 <th>Nominalwert</th>
-                <th>Faelligkeit</th>
+                <th>Fälligkeit</th>
                 <th>Status</th>
                 <th>Risiko</th>
-                <th>Letzte Aktivitaet</th>
+                <th>Letzte Aktivität</th>
               </tr>
             </thead>
             <tbody>

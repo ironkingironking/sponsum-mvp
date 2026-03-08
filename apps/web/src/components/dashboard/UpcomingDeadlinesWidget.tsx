@@ -8,7 +8,7 @@ type UpcomingDeadlinesWidgetProps = {
 
 export function UpcomingDeadlinesWidget({ items }: UpcomingDeadlinesWidgetProps) {
   return (
-    <WidgetCard title="Upcoming Deadlines" subtitle="Faelligkeiten und Reaktionsfristen in den naechsten 14 Tagen">
+    <WidgetCard title="Upcoming Deadlines" subtitle="Fälligkeiten und Reaktionsfristen in den nächsten 14 Tagen">
       {items.length === 0 ? (
         <p className="dashboard-empty">Keine Fristen im Betrachtungszeitraum.</p>
       ) : (

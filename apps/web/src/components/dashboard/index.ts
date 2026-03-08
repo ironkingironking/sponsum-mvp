@@ -1,4 +1,5 @@
 export * from "./ActivityFeed";
+export * from "./ClaimInsightsWidget";
 export * from "./CounterpartyExposureWidget";
 export * from "./DashboardGrid";
 export * from "./DashboardHeader";

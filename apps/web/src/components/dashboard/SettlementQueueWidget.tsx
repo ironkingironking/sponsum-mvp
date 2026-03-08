@@ -8,9 +8,9 @@ type SettlementQueueWidgetProps = {
 
 export function SettlementQueueWidget({ items }: SettlementQueueWidgetProps) {
   return (
-    <WidgetCard title="Settlement Queue" subtitle="Pending, partial und bestaetigte Settlements">
+    <WidgetCard title="Settlement Queue" subtitle="Pending, partial und bestätigte Settlements">
       {items.length === 0 ? (
-        <p className="dashboard-empty">Keine Settlement-Eintraege vorhanden.</p>
+        <p className="dashboard-empty">Keine Settlement-Einträge vorhanden.</p>
       ) : (
         <div className="dashboard-table-wrap">
           <table className="dashboard-table">
@@ -18,11 +18,11 @@ export function SettlementQueueWidget({ items }: SettlementQueueWidgetProps) {
               <tr>
                 <th>Instrument</th>
                 <th>Methode</th>
-                <th>Faellig</th>
+                <th>Fällig</th>
                 <th>Betrag</th>
                 <th>Status</th>
                 <th>Evidence</th>
-                <th>Naechste Aktion</th>
+                <th>Nächste Aktion</th>
               </tr>
             </thead>
             <tbody>

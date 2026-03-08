@@ -10,7 +10,7 @@ export function CounterpartyExposureWidget({ exposures }: CounterpartyExposureWi
   return (
     <WidgetCard title="Counterparty Exposure" subtitle="Konzentrationsrisiken nach Gegenpartei">
       {exposures.length === 0 ? (
-        <p className="dashboard-empty">Keine Exposure-Daten verfuegbar.</p>
+        <p className="dashboard-empty">Keine Exposure-Daten verfügbar.</p>
       ) : (
         <div className="dashboard-list">
           {exposures.map((entry) => (

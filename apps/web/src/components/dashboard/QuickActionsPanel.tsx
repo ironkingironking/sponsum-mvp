@@ -8,9 +8,9 @@ type QuickActionsPanelProps = {
 
 export function QuickActionsPanel({ actions }: QuickActionsPanelProps) {
   return (
-    <WidgetCard title="Quick Actions" subtitle="Direkte operativen Aktionen fuer den Tagesbetrieb.">
+    <WidgetCard title="Quick Actions" subtitle="Direkte operative Aktionen für den Tagesbetrieb.">
       {actions.length === 0 ? (
-        <p className="dashboard-empty">Keine Quick Actions fuer den aktuellen Filter.</p>
+        <p className="dashboard-empty">Keine Quick Actions für den aktuellen Filter.</p>
       ) : (
         <div className="dashboard-list">
           {actions.map((action) => (

@@ -12,18 +12,18 @@ function actionLabel(action: ActivityFeedItem["action"]): string {
     listing_published: "Angebot publiziert",
     document_uploaded: "Dokument hochgeladen",
     counterparty_validated: "Gegenpartei validiert",
-    settlement_confirmed: "Settlement bestaetigt",
-    dispute_opened: "Dispute eroeffnet",
-    clause_updated: "Klausel geaendert"
+    settlement_confirmed: "Settlement bestätigt",
+    dispute_opened: "Dispute eröffnet",
+    clause_updated: "Klausel geändert"
   };
   return labels[action];
 }
 
 export function ActivityFeed({ items }: ActivityFeedProps) {
   return (
-    <WidgetCard title="Activity Feed" subtitle="Letzte operativen Ereignisse" actionHref="/dashboard?tab=admin" actionLabel="Alle Events">
+      <WidgetCard title="Activity Feed" subtitle="Letzte operativen Ereignisse" actionHref="/dashboard?tab=admin" actionLabel="Alle Events">
       {items.length === 0 ? (
-        <p className="dashboard-empty">Keine Aktivitaeten im gewaehlten Zeitraum.</p>
+        <p className="dashboard-empty">Keine Aktivitäten im gewählten Zeitraum.</p>
       ) : (
         <div className="dashboard-feed">
           {items.map((item) => (

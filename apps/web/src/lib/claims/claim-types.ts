@@ -50,6 +50,7 @@ export type ClaimRemedyType =
   | "payment_order"
   | "late_fee"
   | "specific_performance"
+  | "information_order"
   | "recourse"
   | "rescission"
   | "indemnity"
@@ -61,6 +62,31 @@ export type ClaimRemedyType =
   | "termination_option"
   | "suspension"
   | "damages_claim"
+  | "security_topup"
+  | "enforcement"
+  | "default_notice"
+  | "notice_cure"
+  | "damages"
+  | "clarification"
+  | "forum_change_request"
+  | "forum_confirmation"
+  | "procedural_order"
+  | "arbitration_trigger"
+  | "waiver_confirmation"
+  | "procedural_reset"
+  | "recourse_enforcement"
+  | "acceleration"
+  | "collateral_enforcement"
+  | "notice_restart"
+  | "late_fee_adjustment"
+  | "injunction"
+  | "assignment_clarification"
+  | "consent_repair"
+  | "termination_confirmation"
+  | "cure_period"
+  | "notarial_enforcement"
+  | "court_confirmation"
+  | "interpretation_note"
   | "custom";
 
 export type ClaimEvidenceType =
@@ -73,6 +99,17 @@ export type ClaimEvidenceType =
   | "signature_page"
   | "settlement_log"
   | "notice_letter"
+  | "jurisdiction_notice"
+  | "arbitration_notice"
+  | "notice_of_non_payment"
+  | "demand_letter"
+  | "payment_history"
+  | "default_notice"
+  | "request_log"
+  | "dunning_notice"
+  | "disclosure_evidence"
+  | "breach_notice"
+  | "notarial_record"
   | "custom";
 
 export type BreachDetectedFrom =
@@ -97,6 +134,8 @@ export type ClaimTargetReference = {
   targetClauseBlockId?: string;
   targetSettlementEventId?: string;
   targetDocumentRequirementId?: string;
+  targetRequiredDocumentType?: string;
+  targetDocumentFieldId?: string;
   targetDocumentId?: string;
   targetGroupKey?: string;
   targetPartyRole?: string;
@@ -124,6 +163,7 @@ export type StructuredClaim = {
   severity: ClaimSeverity;
   evidenceTypes: ClaimEvidenceType[];
   evidenceDocumentIds?: string[];
+  requestedDeadline?: string;
   createdAt: string;
   updatedAt: string;
 } & ClaimTargetReference;
@@ -155,6 +195,8 @@ export type ClaimTargetCandidate = {
   clauseBlockId?: string;
   settlementEventId?: string;
   documentRequirementId?: string;
+  requiredDocumentType?: string;
+  documentFieldId?: string;
   documentId?: string;
   partyRole?: string;
   obligationKey?: string;

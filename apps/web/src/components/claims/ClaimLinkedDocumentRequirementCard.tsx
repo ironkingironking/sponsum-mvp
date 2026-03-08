@@ -25,22 +25,22 @@ export function ClaimLinkedDocumentRequirementCard({
 
   return (
     <div className="claim-link-card">
-      <strong>Document Link</strong>
+      <strong>Dokumentenverknüpfung</strong>
       {requirement ? (
         <>
           <p>
-            requirement: {definition?.label || requirement.requirementId} ({requirement.id})
+            Anforderung: {definition?.label || requirement.requirementId} ({requirement.id})
           </p>
-          <p>status: {requirement.status}</p>
+          <p>Status: {requirement.status}</p>
         </>
       ) : null}
       {document ? (
         <>
           <p>
-            uploaded document: {document.title} ({document.id})
+            Hochgeladenes Dokument: {document.title} ({document.id})
           </p>
           <p>
-            status: {document.status} · signed: {document.signed ? "yes" : "no"} · readable: {document.readable ? "yes" : "no"}
+            Status: {document.status} · signiert: {document.signed ? "ja" : "nein"} · lesbar: {document.readable ? "ja" : "nein"}
           </p>
         </>
       ) : null}

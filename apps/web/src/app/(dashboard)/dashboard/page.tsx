@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   ActivityFeed,
+  ClaimInsightsWidget,
   CounterpartyExposureWidget,
   DashboardGrid,
   DashboardHeader,
@@ -36,6 +37,7 @@ function renderDashboardWidget(widgetId: DashboardWidgetId, data: ReturnType<typ
     quick_actions: <QuickActionsPanel actions={data.quickActions} />,
     instrument_pipeline: <InstrumentPipelineWidget buckets={data.pipeline} />,
     risk_alerts: <RiskAlertsWidget alerts={data.riskAlerts} />,
+    claim_insights: <ClaimInsightsWidget insights={data.claimInsights} />,
     settlement_queue: <SettlementQueueWidget items={data.settlementQueue} />,
     dispute_queue: <DisputeQueueWidget items={data.disputeQueue} />,
     marketplace_performance: <MarketplacePerformanceWidget metrics={data.marketplacePerformance} />,
@@ -87,7 +89,7 @@ export default function DashboardPage() {
 
       {viewData.filteredInstruments.length === 0 ? (
         <div className="dashboard-empty-state">
-          <h3>Keine Daten fuer diesen Filter</h3>
+          <h3>Keine Daten für diesen Filter</h3>
           <p>Bitte Zeitraum, Rolle oder Statusfilter anpassen.</p>
         </div>
       ) : (

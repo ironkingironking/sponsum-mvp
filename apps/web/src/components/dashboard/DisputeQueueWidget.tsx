@@ -8,7 +8,7 @@ type DisputeQueueWidgetProps = {
 
 export function DisputeQueueWidget({ items }: DisputeQueueWidgetProps) {
   return (
-    <WidgetCard title="Dispute Queue" subtitle="Offene Streitfaelle inklusive Reaktionsfrist und Eskalation">
+    <WidgetCard title="Dispute Queue" subtitle="Offene Streitfälle inklusive Reaktionsfrist und Eskalation">
       {items.length === 0 ? (
         <p className="dashboard-empty">Keine offenen Disputes.</p>
       ) : (

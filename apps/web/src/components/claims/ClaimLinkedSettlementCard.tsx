@@ -18,18 +18,18 @@ export function ClaimLinkedSettlementCard({ context, settlementEventId }: ClaimL
 
   return (
     <div className="claim-link-card">
-      <strong>Settlement Event</strong>
+      <strong>Settlement-Ereignis</strong>
       <p>
         {event.eventType} ({event.id})
       </p>
       <p>
-        due: {formatDateTime(event.dueAt)} · expected {event.expectedAmount} {event.currency} · settled {event.settledAmount}{" "}
+        fällig: {formatDateTime(event.dueAt)} · erwartet {event.expectedAmount} {event.currency} · erfüllt {event.settledAmount}{" "}
         {event.currency}
       </p>
       <p>
-        status: {event.settlementStatus} · obligation: {event.obligationKey}
+        Status: {event.settlementStatus} · Obligation: {event.obligationKey}
       </p>
-      {event.breachFlags.length ? <p>breach flags: {event.breachFlags.join(", ")}</p> : null}
+      {event.breachFlags.length ? <p>Breach-Flags: {event.breachFlags.join(", ")}</p> : null}
     </div>
   );
 }

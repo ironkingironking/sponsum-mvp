@@ -22,7 +22,7 @@ export function ClaimTargetSelector({ targets, selectedId, onSelect }: ClaimTarg
           <div>
             <strong>{target.label}</strong>
             <p>
-              {target.targetType} {target.groupKey ? `· ${target.groupKey}` : ""}
+              Zieltyp {target.targetType} {target.groupKey ? `· ${target.groupKey}` : ""}
             </p>
             <p>{target.description}</p>
           </div>

@@ -17,12 +17,12 @@ export function ClaimLinkedClauseCard({ context, clauseId }: ClaimLinkedClauseCa
 
   return (
     <div className="claim-link-card">
-      <strong>Clause Block</strong>
+      <strong>Klauselblock</strong>
       <p>
         {clause.title} ({clause.id})
       </p>
       <p>{clause.effectiveText}</p>
-      {clause.disputeCategories?.length ? <p>dispute categories: {clause.disputeCategories.join(", ")}</p> : null}
+      {clause.disputeCategories?.length ? <p>Dispute-Kategorien: {clause.disputeCategories.join(", ")}</p> : null}
     </div>
   );
 }

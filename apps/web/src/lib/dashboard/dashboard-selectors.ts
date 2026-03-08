@@ -1,4 +1,5 @@
 import { dashboardMockData } from "./dashboard-mocks";
+import { claimDashboardInsights } from "@/lib/claims";
 import { formatCurrency, formatNumber } from "./dashboard-formatters";
 import type {
   CounterpartyExposure,
@@ -116,17 +117,17 @@ function buildKpis(
     },
     {
       id: "due_in_7_days",
-      label: "Faellig in 7 Tagen",
+      label: "Fällig in 7 Tagen",
       value: formatNumber(dueSoon),
-      description: "Baldige Faelligkeiten",
+      description: "Baldige Fälligkeiten",
       href: "/dashboard?tab=settlement",
       severity: dueSoon > 4 ? "warning" : "info"
     },
     {
       id: "overdue",
-      label: "Ueberfaellig",
+      label: "Überfällig",
       value: formatNumber(overdue),
-      description: "Instrumente ausserhalb Frist",
+      description: "Instrumente außerhalb der Frist",
       href: "/dashboard?tab=settlement",
       severity: overdue > 0 ? "critical" : "info"
     },
@@ -134,7 +135,7 @@ function buildKpis(
       id: "open_disputes",
       label: "Offene Disputes",
       value: formatNumber(openDisputes),
-      description: "Streitfaelle in Bearbeitung",
+      description: "Streitfälle in Bearbeitung",
       href: "/dashboard?tab=disputes",
       severity: openDisputes > 1 ? "warning" : "info"
     },
@@ -150,7 +151,7 @@ function buildKpis(
       id: "missing_documents",
       label: "Fehlende Pflichtdokumente",
       value: formatNumber(missingDocs),
-      description: "Instrumente mit Luecken",
+      description: "Instrumente mit Lücken",
       href: "/dashboard?tab=risk",
       severity: missingDocs > 0 ? "critical" : "info"
     },
@@ -272,7 +273,7 @@ function buildRiskAlerts(
         id: `ra-cp-${instrument.id}`,
         severity: "warning",
         title: "Counterparty incomplete",
-        description: "KYC/Counterparty Daten nicht vollstaendig",
+        description: "KYC/Counterparty-Daten nicht vollständig",
         instrumentId: instrument.id,
         instrumentTitle: instrument.title,
         source: "counterparty_incomplete"
@@ -284,7 +285,7 @@ function buildRiskAlerts(
         id: `ra-set-${instrument.id}`,
         severity: "critical",
         title: "Settlement not prepared",
-        description: "Faelligkeit innerhalb 7 Tage ohne Settlement Prep",
+        description: "Fälligkeit innerhalb von 7 Tagen ohne Settlement-Vorbereitung",
         instrumentId: instrument.id,
         instrumentTitle: instrument.title,
         dueAt: instrument.maturityDate,
@@ -297,7 +298,7 @@ function buildRiskAlerts(
         id: `ra-over-${instrument.id}`,
         severity: "critical",
         title: "Overdue payment",
-        description: "Instrument ist ueberfaellig",
+        description: "Instrument ist überfällig",
         instrumentId: instrument.id,
         instrumentTitle: instrument.title,
         dueAt: instrument.maturityDate,
@@ -310,7 +311,7 @@ function buildRiskAlerts(
         id: `ra-manual-${instrument.id}`,
         severity: "warning",
         title: "Manual review flag",
-        description: "Ungewoehnliche Parameter / manuelle Pruefung noetig",
+        description: "Ungewöhnliche Parameter / manuelle Prüfung nötig",
         instrumentId: instrument.id,
         instrumentTitle: instrument.title,
         source: "manual_review"
@@ -343,7 +344,7 @@ function buildRiskAlerts(
         id: `ra-set-evidence-${settlement.id}`,
         severity: "warning",
         title: "Missing payment evidence",
-        description: `Settlement Evidence fehlt fuer ${settlement.instrumentTitle}`,
+        description: `Settlement-Evidence fehlt für ${settlement.instrumentTitle}`,
         instrumentId: settlement.instrumentId,
         instrumentTitle: settlement.instrumentTitle,
         dueAt: settlement.dueDate,
@@ -358,7 +359,7 @@ function buildRiskAlerts(
         id: `ra-dispute-doc-${dispute.id}`,
         severity: dispute.documentationStatus === "missing" ? "critical" : "warning",
         title: "Dispute documentation gap",
-        description: `Dokumentenlage ${dispute.documentationStatus} fuer ${dispute.instrumentTitle}`,
+        description: `Dokumentenlage ${dispute.documentationStatus} für ${dispute.instrumentTitle}`,
         instrumentId: dispute.instrumentId,
         instrumentTitle: dispute.instrumentTitle,
         dueAt: dispute.responseDueAt,
@@ -498,8 +499,10 @@ export function buildDashboardViewData(
   const marketplacePerformance = buildMarketplacePerformance(filteredInstruments);
   const pipeline = buildPipeline(filteredInstruments);
   const recentInstruments = filteredInstruments.slice(0, 12);
+  const filteredClaims = data.claims.filter((claim) => instrumentsById.has(claim.instrumentId));
 
   const kpis = buildKpis(filteredInstruments, disputeQueue, settlementQueue, now);
+  const claimInsights = claimDashboardInsights(filteredClaims);
 
   const quickActions = filters.onlyCritical
     ? data.quickActions.filter((action) => action.severity === "warning" || action.severity === "critical")
@@ -518,7 +521,8 @@ export function buildDashboardViewData(
     counterpartyExposure,
     documentCompleteness,
     marketplacePerformance,
-    quickActions
+    quickActions,
+    claimInsights
   };
 }
 

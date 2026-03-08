@@ -6,7 +6,7 @@ type ClaimTargetSummaryProps = {
 
 export function ClaimTargetSummary({ target }: ClaimTargetSummaryProps) {
   if (!target) {
-    return <p className="dashboard-empty">Noch kein Target ausgewaehlt.</p>;
+    return <p className="dashboard-empty">Noch kein Ziel ausgewählt.</p>;
   }
 
   return (
@@ -14,11 +14,11 @@ export function ClaimTargetSummary({ target }: ClaimTargetSummaryProps) {
       <h4>{target.label}</h4>
       <p>{target.description}</p>
       <p>
-        targetType: <strong>{target.targetType}</strong>
+        Zieltyp: <strong>{target.targetType}</strong>
       </p>
       {target.groupKey ? (
         <p>
-          group: <strong>{target.groupKey}</strong>
+          Gruppe: <strong>{target.groupKey}</strong>
         </p>
       ) : null}
       {target.expectedValue !== undefined || target.actualValue !== undefined ? (

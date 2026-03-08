@@ -1,4 +1,5 @@
 import type { InstrumentType } from "@/lib/instruments";
+import type { ClaimTargetType, StructuredClaim } from "@/lib/claims/claim-types";
 
 export type DashboardRole = "investor" | "originator" | "operator" | "admin";
 
@@ -25,6 +26,7 @@ export type DashboardWidgetId =
   | "quick_actions"
   | "instrument_pipeline"
   | "risk_alerts"
+  | "claim_insights"
   | "settlement_queue"
   | "dispute_queue"
   | "marketplace_performance"
@@ -219,6 +221,27 @@ export type DashboardDataSet = {
   settlements: SettlementQueueItem[];
   disputes: DisputeQueueItem[];
   quickActions: QuickAction[];
+  claims: StructuredClaim[];
+};
+
+export type ClaimTargetInsight = {
+  targetType: ClaimTargetType;
+  count: number;
+};
+
+export type ClaimDashboardInsights = {
+  openCount: number;
+  byTargetType: ClaimTargetInsight[];
+  overdueSettlementLinked: number;
+  documentComplianceLinked: number;
+  contestedClauses: Array<{
+    clauseBlockId: string;
+    count: number;
+  }>;
+  disputedFields: Array<{
+    templateFieldId: string;
+    count: number;
+  }>;
 };
 
 export type DashboardViewData = {
@@ -235,4 +258,5 @@ export type DashboardViewData = {
   documentCompleteness: DocumentCompletenessItem[];
   marketplacePerformance: MarketplacePerformance;
   quickActions: QuickAction[];
+  claimInsights: ClaimDashboardInsights;
 };

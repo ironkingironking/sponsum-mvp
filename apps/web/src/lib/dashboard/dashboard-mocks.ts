@@ -1,4 +1,5 @@
 import type { DashboardDataSet, DashboardInstrument } from "./dashboard-types";
+import { claimMocks } from "@/lib/claims";
 
 function daysFromNow(days: number): string {
   const date = new Date();
@@ -590,7 +591,7 @@ export const dashboardMockData: DashboardDataSet = {
     },
     {
       id: "qa-003",
-      label: "Angebot veroeffentlichen",
+      label: "Angebot veröffentlichen",
       description: "Draft nach Marketplace pushen",
       href: "/marketplace",
       severity: "info"
@@ -611,16 +612,17 @@ export const dashboardMockData: DashboardDataSet = {
     },
     {
       id: "qa-006",
-      label: "Dispute eroeffnen",
-      description: "Neue Streitfaelle dokumentieren",
+      label: "Dispute eröffnen",
+      description: "Neue Streitfälle dokumentieren",
       href: "/disputes",
       severity: "critical"
     },
     {
       id: "qa-007",
-      label: "Gegenpartei pruefen",
+      label: "Gegenpartei prüfen",
       description: "KYC/Counterparty completeness",
       href: "/dashboard?tab=risk"
     }
-  ]
+  ],
+  claims: claimMocks
 };

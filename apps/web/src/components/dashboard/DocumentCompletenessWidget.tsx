@@ -9,7 +9,7 @@ export function DocumentCompletenessWidget({ items }: DocumentCompletenessWidget
   return (
     <WidgetCard title="Document Completeness" subtitle="Pflichtdokumente und Signaturen">
       {items.length === 0 ? (
-        <p className="dashboard-empty">Alle Dokumentsets sind vollstaendig.</p>
+        <p className="dashboard-empty">Alle Dokumentsets sind vollständig.</p>
       ) : (
         <div className="dashboard-table-wrap">
           <table className="dashboard-table">

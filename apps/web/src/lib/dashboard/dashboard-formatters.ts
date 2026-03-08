@@ -39,7 +39,7 @@ export function formatRelativeDays(value: string, now = new Date()): string {
   const deltaDays = Math.ceil(deltaMs / (1000 * 60 * 60 * 24));
 
   if (deltaDays < 0) {
-    return `${Math.abs(deltaDays)} Tage ueberfaellig`;
+    return `${Math.abs(deltaDays)} Tage überfällig`;
   }
 
   if (deltaDays === 0) {

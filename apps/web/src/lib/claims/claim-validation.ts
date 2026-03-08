@@ -14,52 +14,52 @@ function requireField<T>(errors: string[], value: T | undefined | null, message:
 export function validateStructuredClaim(claim: StructuredClaim, blueprint?: ClaimBlueprint): ClaimValidationResult {
   const errors: string[] = [];
 
-  requireField(errors, claim.title, "Claim title is required.");
-  requireField(errors, claim.summary, "Claim summary is required.");
-  requireField(errors, claim.statementByClaimant, "Claim statement is required.");
+  requireField(errors, claim.title, "Claim-Titel ist erforderlich.");
+  requireField(errors, claim.summary, "Claim-Zusammenfassung ist erforderlich.");
+  requireField(errors, claim.statementByClaimant, "Claim-Statement ist erforderlich.");
 
   if (claim.targetType === "template_field") {
-    requireField(errors, claim.targetTemplateFieldId, "targetTemplateFieldId is required for template_field claims.");
+    requireField(errors, claim.targetTemplateFieldId, "targetTemplateFieldId ist für template_field erforderlich.");
   }
 
   if (claim.targetType === "clause_block") {
-    requireField(errors, claim.targetClauseBlockId, "targetClauseBlockId is required for clause_block claims.");
+    requireField(errors, claim.targetClauseBlockId, "targetClauseBlockId ist für clause_block erforderlich.");
   }
 
   if (claim.targetType === "settlement_event") {
-    requireField(errors, claim.targetSettlementEventId, "targetSettlementEventId is required for settlement_event claims.");
+    requireField(errors, claim.targetSettlementEventId, "targetSettlementEventId ist für settlement_event erforderlich.");
   }
 
   if (claim.targetType === "document_requirement") {
     requireField(
       errors,
       claim.targetDocumentRequirementId,
-      "targetDocumentRequirementId is required for document_requirement claims."
+      "targetDocumentRequirementId ist für document_requirement erforderlich."
     );
   }
 
   if (claim.targetType === "uploaded_document") {
-    requireField(errors, claim.targetDocumentId, "targetDocumentId is required for uploaded_document claims.");
+    requireField(errors, claim.targetDocumentId, "targetDocumentId ist für uploaded_document erforderlich.");
   }
 
   if (claim.targetType === "obligation") {
-    requireField(errors, claim.targetObligationKey, "targetObligationKey is required for obligation claims.");
+    requireField(errors, claim.targetObligationKey, "targetObligationKey ist für obligation erforderlich.");
   }
 
   if (!claim.targetValueSnapshot) {
-    errors.push("targetValueSnapshot is required for auditability.");
+    errors.push("targetValueSnapshot ist für die Nachvollziehbarkeit erforderlich.");
   }
 
   if (blueprint?.requiresAmount && (claim.amountInDispute === undefined || claim.amountInDispute <= 0)) {
-    errors.push("This claim blueprint requires amountInDispute.");
+    errors.push("Dieses Claim-Blueprint erfordert amountInDispute.");
   }
 
   if (blueprint?.requiresClauseReference && !claim.targetClauseBlockId) {
-    errors.push("This claim blueprint requires a clause reference.");
+    errors.push("Dieses Claim-Blueprint erfordert eine Klausel-Referenz.");
   }
 
   if (blueprint?.requiresSettlementReference && !claim.targetSettlementEventId) {
-    errors.push("This claim blueprint requires a settlement event reference.");
+    errors.push("Dieses Claim-Blueprint erfordert eine Settlement-Event-Referenz.");
   }
 
   if (
@@ -68,15 +68,15 @@ export function validateStructuredClaim(claim: StructuredClaim, blueprint?: Clai
     !claim.targetDocumentId &&
     !claim.evidenceDocumentIds?.length
   ) {
-    errors.push("This claim blueprint requires a document reference.");
+    errors.push("Dieses Claim-Blueprint erfordert eine Dokument-Referenz.");
   }
 
   if ((claim.claimType === "non_payment" || claim.claimType === "partial_payment") && !claim.amountInDispute) {
-    errors.push("Payment-related claims require amountInDispute.");
+    errors.push("Zahlungsbezogene Claims erfordern amountInDispute.");
   }
 
   if (claim.status !== "draft" && (!claim.evidenceTypes || claim.evidenceTypes.length === 0)) {
-    errors.push("Non-draft claims require at least one evidence type.");
+    errors.push("Claims außerhalb von Draft erfordern mindestens einen Evidence-Typ.");
   }
 
   return {

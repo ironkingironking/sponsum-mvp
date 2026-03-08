@@ -1,7 +1,7 @@
-import type { StructuredClaim } from "./claim-types";
+import type { ClaimTargetType, StructuredClaim } from "./claim-types";
 
 export function groupClaimsByTargetType(claims: StructuredClaim[]) {
-  const groups = new Map<string, number>();
+  const groups = new Map<ClaimTargetType, number>();
   for (const claim of claims) {
     groups.set(claim.targetType, (groups.get(claim.targetType) || 0) + 1);
   }
