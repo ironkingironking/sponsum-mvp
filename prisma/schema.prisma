@@ -1,0 +1,384 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum InstrumentType {
+  INVOICE_SALE
+  COLLATERALIZED_BORROWING
+  BILL_OF_EXCHANGE
+  VENTURE_FINANCING
+  ANNUITY_GUELT
+  GUARANTEE_ATTACHMENT
+  MARKETPLACE_PURCHASE
+  PROMISSORY_NOTE
+  ASSIGNABLE_RECEIVABLE
+  CUSTOM_PRIVATE_LAW
+}
+
+enum ClaimStatus {
+  DRAFT
+  ISSUED
+  ACCEPTED
+  ACTIVE
+  PARTIALLY_SETTLED
+  SETTLED
+  OVERDUE
+  DEFAULTED
+  DISPUTED
+  IN_ENFORCEMENT
+  RESOLVED
+  CANCELLED
+}
+
+enum ListingStatus {
+  DRAFT
+  PUBLISHED
+  PRIVATE
+  FILLED
+  CANCELLED
+}
+
+enum SettlementModel {
+  SINGLE_MATURITY
+  INSTALLMENTS
+  ANNUITY
+  PROFIT_SHARE
+  REVENUE_SHARE
+  MILESTONE
+  CONDITIONAL
+}
+
+enum SettlementEventType {
+  PAYMENT_DUE
+  PAYMENT_CONFIRMED
+  PARTIAL_PAYMENT
+  DEFAULT_TRIGGERED
+  GUARANTOR_TRIGGERED
+  COLLATERAL_TRIGGERED
+  ESCROW_TRIGGERED
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  MEDIATION
+  ARBITRATION
+  COURT
+  RESOLVED
+  REJECTED
+}
+
+enum DisputeType {
+  NON_PAYMENT
+  DELAYED_PAYMENT
+  PARTIAL_PAYMENT
+  CONTRACT_BREACH
+  COLLATERAL_DISPUTE
+  GUARANTOR_DISPUTE
+  ESCROW_CONFLICT
+  CUSTODY_CONFLICT
+  FRAUD_ALLEGATION
+  TRANSFER_DISPUTE
+  PROFIT_SHARE_DISPUTE
+}
+
+enum TrustTier {
+  UNVERIFIED
+  BASIC_VERIFIED
+  VERIFIED
+  TRUSTED_ISSUER
+  INSTITUTIONAL_ISSUER
+}
+
+enum CollateralStatus {
+  PENDING
+  VERIFIED
+  ENFORCED
+  RELEASED
+}
+
+enum EscrowStatus {
+  DRAFT
+  FUNDED
+  RELEASED
+  RETURNED
+  DISPUTED
+}
+
+enum CustodyStatus {
+  DEPOSITED
+  HELD
+  RELEASED
+  DISPUTED
+}
+
+model User {
+  id             String            @id @default(cuid())
+  email          String            @unique
+  fullName       String
+  passwordHash   String
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  trustProfile   TrustProfile?
+  claimsCreated  Claim[]           @relation("ClaimCreator")
+  claimsIssued   Claim[]           @relation("ClaimIssuer")
+  parties        ClaimParty[]
+  listingsSold   MarketplaceListing[] @relation("ListingSeller")
+  listingsBought MarketplaceListing[] @relation("ListingBuyer")
+  disputesAsClaimant DisputeCase[] @relation("DisputeClaimant")
+  disputesAsRespondent DisputeCase[] @relation("DisputeRespondent")
+  disputesAsMediator DisputeCase[] @relation("DisputeMediator")
+  uploadedDocs   UploadedDocument[]
+  events         EventLog[]        @relation("EventActor")
+}
+
+model ClaimTemplate {
+  id              String         @id @default(cuid())
+  key             String         @unique
+  title           String
+  description     String
+  instrumentType  InstrumentType
+  simpleGuidance  String
+  advancedSchema  Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  claims          Claim[]
+}
+
+model Claim {
+  id               String          @id @default(cuid())
+  title            String
+  instrumentType   InstrumentType
+  status           ClaimStatus     @default(DRAFT)
+  amount           Decimal         @db.Decimal(18, 2)
+  currency         String
+  issueDate        DateTime
+  maturityDate     DateTime
+  settlementModel  SettlementModel
+  transferability  String
+  guarantors       String?
+  collateralLinks  String?
+  escrowLinks      String?
+  custodyLinks     String?
+  trustLinks       String?
+  disputeConfig    String
+  governingLaw     String
+  jurisdiction     String
+  humanSummary     String
+  riskRating       String          @default("MEDIUM")
+  verificationBadge String         @default("UNVERIFIED")
+  isPartialTradable Boolean        @default(false)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  createdById      String
+  issuerId         String?
+  templateId       String?
+
+  createdBy        User            @relation("ClaimCreator", fields: [createdById], references: [id])
+  issuer           User?           @relation("ClaimIssuer", fields: [issuerId], references: [id])
+  template         ClaimTemplate?  @relation(fields: [templateId], references: [id])
+
+  parties          ClaimParty[]
+  listings         MarketplaceListing[]
+  settlementEvents SettlementEvent[]
+  disputes         DisputeCase[]
+  collateralRecords CollateralRecord[]
+  escrowArrangements EscrowArrangement[]
+  custodyRecords   CustodyRecord[]
+  uploadedDocuments UploadedDocument[]
+  eventLogs        EventLog[]
+
+  @@index([status])
+  @@index([instrumentType])
+  @@index([jurisdiction])
+}
+
+model ClaimParty {
+  id          String     @id @default(cuid())
+  claimId     String
+  userId      String?
+  role        String
+  displayName String
+  rights      String?
+  duties      String?
+  createdAt   DateTime   @default(now())
+
+  claim       Claim      @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  user        User?      @relation(fields: [userId], references: [id])
+
+  @@index([claimId])
+}
+
+model MarketplaceListing {
+  id               String        @id @default(cuid())
+  claimId          String
+  sellerId         String
+  buyerId          String?
+  status           ListingStatus @default(DRAFT)
+  askPrice         Decimal       @db.Decimal(18, 2)
+  ownershipFraction Decimal      @db.Decimal(6, 4) @default(1)
+  transferConditions String
+  privateShareToken String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  claim            Claim         @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  seller           User          @relation("ListingSeller", fields: [sellerId], references: [id])
+  buyer            User?         @relation("ListingBuyer", fields: [buyerId], references: [id])
+
+  @@index([status])
+  @@index([claimId])
+}
+
+model SettlementEvent {
+  id               String             @id @default(cuid())
+  claimId          String
+  type             SettlementEventType
+  status           ClaimStatus
+  dueDate          DateTime?
+  amountDue        Decimal?           @db.Decimal(18, 2)
+  amountPaid       Decimal?           @db.Decimal(18, 2)
+  confirmedAt      DateTime?
+  evidenceUrl      String?
+  note             String?
+  createdAt        DateTime           @default(now())
+
+  claim            Claim              @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@index([claimId])
+}
+
+model DisputeCase {
+  id               String        @id @default(cuid())
+  relatedClaimId   String
+  claimantId       String
+  respondentId     String
+  disputeType      DisputeType
+  disputeReason    String
+  status           DisputeStatus @default(OPEN)
+  resolutionPath   String
+  evidence         String?
+  mediatorId       String?
+  decision         String?
+  enforcementStatus String?
+  auditLog         String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  claim            Claim         @relation(fields: [relatedClaimId], references: [id], onDelete: Cascade)
+  claimant         User          @relation("DisputeClaimant", fields: [claimantId], references: [id])
+  respondent       User          @relation("DisputeRespondent", fields: [respondentId], references: [id])
+  mediator         User?         @relation("DisputeMediator", fields: [mediatorId], references: [id])
+
+  @@index([relatedClaimId])
+  @@index([status])
+}
+
+model TrustProfile {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  totalClaimsIssued    Int       @default(0)
+  totalClaimsBought    Int       @default(0)
+  totalClaimsSold      Int       @default(0)
+  totalClaimsSettled   Int       @default(0)
+  defaultRate          Decimal   @db.Decimal(5, 2) @default(0)
+  disputeRate          Decimal   @db.Decimal(5, 2) @default(0)
+  repaymentReliability Decimal   @db.Decimal(5, 2) @default(0)
+  reputationScore      Int       @default(0)
+  trustTier            TrustTier @default(UNVERIFIED)
+  verificationBadges   String?
+  updatedAt            DateTime  @updatedAt
+
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CollateralRecord {
+  id                String           @id @default(cuid())
+  relatedClaimId    String
+  collateralType    String
+  owner             String
+  beneficiary       String
+  valuation         Decimal          @db.Decimal(18, 2)
+  currency          String           @default("CHF")
+  verificationStatus String
+  lienRank          Int              @default(1)
+  status            CollateralStatus @default(PENDING)
+  auditLog          String?
+  createdAt         DateTime         @default(now())
+
+  claim             Claim            @relation(fields: [relatedClaimId], references: [id], onDelete: Cascade)
+
+  @@index([relatedClaimId])
+}
+
+model EscrowArrangement {
+  id                String       @id @default(cuid())
+  relatedClaimId    String
+  escrowAgent       String
+  assetType         String
+  amount            Decimal      @db.Decimal(18, 2)
+  currency          String       @default("CHF")
+  releaseConditions String
+  status            EscrowStatus @default(DRAFT)
+  auditLog          String?
+  createdAt         DateTime     @default(now())
+
+  claim             Claim        @relation(fields: [relatedClaimId], references: [id], onDelete: Cascade)
+
+  @@index([relatedClaimId])
+}
+
+model CustodyRecord {
+  id                String       @id @default(cuid())
+  relatedClaimId    String
+  custodian         String
+  documentHash      String
+  custodyType       String
+  custodyStatus     CustodyStatus @default(DEPOSITED)
+  auditLog          String?
+  createdAt         DateTime      @default(now())
+
+  claim             Claim         @relation(fields: [relatedClaimId], references: [id], onDelete: Cascade)
+
+  @@index([relatedClaimId])
+}
+
+model UploadedDocument {
+  id             String   @id @default(cuid())
+  claimId        String
+  uploaderId     String?
+  name           String
+  kind           String
+  url            String
+  documentHash   String?
+  isVerified     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  claim          Claim    @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  uploader       User?    @relation(fields: [uploaderId], references: [id])
+
+  @@index([claimId])
+}
+
+model EventLog {
+  id          String   @id @default(cuid())
+  claimId      String?
+  actorId      String?
+  eventType    String
+  payload      Json?
+  createdAt    DateTime @default(now())
+
+  claim        Claim?   @relation(fields: [claimId], references: [id], onDelete: SetNull)
+  actor        User?    @relation("EventActor", fields: [actorId], references: [id])
+
+  @@index([claimId])
+  @@index([eventType])
+}

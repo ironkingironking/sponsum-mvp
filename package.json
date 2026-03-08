@@ -1,0 +1,26 @@
+{
+  "name": "sponsum-mvp-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace @sponsum/api\" \"npm run dev --workspace @sponsum/web\"",
+    "build": "npm run build --workspace @sponsum/shared && npm run build --workspace @sponsum/ui && npm run build --workspace @sponsum/api && npm run build --workspace @sponsum/web",
+    "lint": "npm run lint --workspace @sponsum/api && npm run lint --workspace @sponsum/web",
+    "db:generate": "prisma generate --schema prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema prisma/schema.prisma",
+    "db:seed": "prisma db seed --schema prisma/schema.prisma"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "prisma": "^5.22.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}
