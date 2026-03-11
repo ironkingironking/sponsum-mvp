@@ -14,6 +14,7 @@ const topLinks = [
   ["/messages", "Messages"],
   ["/profile", "Profile"]
 ] as const;
+// UX decision: keep navigation short and task-oriented around create, invest and track.
 
 function onboardingStorageKey(userId: string): string {
   return `sponsum.onboarding.completed.${userId}`;
@@ -108,4 +109,3 @@ export function Nav() {
     </>
   );
 }
-

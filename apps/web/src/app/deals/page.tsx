@@ -12,6 +12,16 @@ type DealItem = {
   settlementEvents?: Array<{ id: string; eventType: string; status: string }>;
 };
 
+function timelineStep(status: string): number {
+  const normalized = status.toUpperCase();
+  if (normalized === "DRAFT") return 1;
+  if (normalized === "ISSUED" || normalized === "PUBLISHED") return 2;
+  if (normalized === "ACTIVE" || normalized === "PARTIALLY_SETTLED") return 3;
+  if (normalized === "OVERDUE" || normalized === "DEFAULTED") return 4;
+  if (normalized === "SETTLED" || normalized === "RESOLVED") return 5;
+  return 2;
+}
+
 function toAmount(value: string): string {
   const number = Number(value);
   if (Number.isNaN(number)) {
@@ -72,6 +82,14 @@ export default async function MyDealsPage() {
                   </Link>
                 </div>
               </div>
+
+              <div className="deal-timeline" style={{ marginTop: 12 }}>
+                {["Created", "Funded", "Active", "Due", "Settled"].map((label, index) => (
+                  <div key={label} className={timelineStep(deal.status) >= index + 1 ? "active" : ""}>
+                    {label}
+                  </div>
+                ))}
+              </div>
             </Card>
           ))}
         </div>
@@ -79,4 +97,3 @@ export default async function MyDealsPage() {
     </div>
   );
 }
-

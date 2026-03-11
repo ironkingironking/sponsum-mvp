@@ -23,6 +23,7 @@ export function OnboardingModal({ isOpen, onClose }: OnboardingModalProps) {
     if (step === 2) return "What do you want to do?";
     return "Start with these actions";
   }, [step]);
+  // UX decision: 3 concise steps reduce first-session drop-off and explain value fast.
 
   if (!isOpen) {
     return null;

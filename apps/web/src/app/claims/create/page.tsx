@@ -13,10 +13,10 @@ export default function CreateClaimPage() {
       <Card>
         <SectionTitle
           title="Create Claim"
-          subtitle="Simple 4-step flow: basic info, debtor details, security, then review."
+          subtitle="Simple 4-step flow: basic info, instrument details, security, then review."
         />
         <p style={{ margin: 0, color: "#475569" }}>
-          Keep it simple. You can add legal and technical details later.
+          Keep it simple. Choose your instrument type and fill only the relevant fields.
         </p>
       </Card>
 
@@ -42,4 +42,3 @@ export default function CreateClaimPage() {
     </div>
   );
 }
-

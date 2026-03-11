@@ -192,7 +192,10 @@ export default async function MarketplacePage() {
                 Due {new Date(row.dueDate).toLocaleDateString("de-CH")} · Expected return {row.expectedReturn.toFixed(1)}%
               </p>
 
+              {/* UX decision: trust indicators sit directly under amount/return so users can evaluate safety before opening details. */}
               <div className="trust-signal-grid">
+                <span>Risk indicator: {trafficLabel(row.riskLevel)}</span>
+                <span>Security level: {row.securityLevel.replaceAll("_", " ")}</span>
                 <span>Security: {trafficText(row.riskLevel)}</span>
                 <span>Issuer trust score: {row.issuerTrustScore}/100</span>
                 <span>Verification: {row.verificationBadge}</span>
