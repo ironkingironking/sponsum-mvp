@@ -1,63 +1,111 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { OnboardingModal } from "@/components/OnboardingModal";
 import { AuthUser, clearStoredSession, getStoredSession, subscribeToAuthChanges } from "@/lib/auth";
 
-const links = [
-  ["/", "Landing"],
+const topLinks = [
   ["/dashboard", "Dashboard"],
   ["/marketplace", "Marketplace"],
-  ["/templates", "Templates"],
-  ["/instruments", "Instruments"],
   ["/claims/create", "Create Claim"],
-  ["/disputes", "Disputes"],
-  ["/collateral", "Collateral"],
-  ["/escrow", "Escrow"],
-  ["/custody", "Custody"]
+  ["/deals", "My Deals"],
+  ["/messages", "Messages"],
+  ["/profile", "Profile"]
 ] as const;
 
+function onboardingStorageKey(userId: string): string {
+  return `sponsum.onboarding.completed.${userId}`;
+}
+
 export function Nav() {
+  const pathname = usePathname();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
     const updateUser = () => {
-      setUser(getStoredSession()?.user ?? null);
+      const session = getStoredSession();
+      setUser(session?.user ?? null);
     };
 
     updateUser();
     return subscribeToAuthChanges(updateUser);
   }, []);
 
+  useEffect(() => {
+    if (!user) {
+      setShowOnboarding(false);
+      return;
+    }
+
+    const key = onboardingStorageKey(user.id);
+    const done = window.localStorage.getItem(key) === "true";
+    setShowOnboarding(!done);
+  }, [user]);
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  function finishOnboarding() {
+    if (user) {
+      window.localStorage.setItem(onboardingStorageKey(user.id), "true");
+    }
+    setShowOnboarding(false);
+  }
+
   return (
-    <header style={{ borderBottom: "1px solid #d7dce4", background: "#fff" }}>
-      <div className="container" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <strong style={{ marginRight: 16 }}>Sponsum</strong>
-        {links.map(([href, label]) => (
-          <Link key={href} href={href} style={{ fontSize: 14, color: "#334155" }}>
-            {label}
+    <>
+      <header className="top-nav">
+        <div className="top-nav-inner">
+          <Link href="/" className="brand">
+            Sponsum
           </Link>
-        ))}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
-          {user ? (
-            <>
-              <span style={{ fontSize: 14, color: "#334155" }}>{user.fullName}</span>
-              <button type="button" onClick={clearStoredSession}>
-                Logout
-              </button>
-            </>
-          ) : (
-            <>
-              <Link href="/auth/login" style={{ fontSize: 14, color: "#334155" }}>
-                Login
-              </Link>
-              <Link href="/auth/register" style={{ fontSize: 14, color: "#334155" }}>
-                Register
-              </Link>
-            </>
-          )}
+
+          <button
+            type="button"
+            className="menu-toggle"
+            aria-expanded={menuOpen}
+            aria-label="Toggle navigation menu"
+            onClick={() => setMenuOpen((current) => !current)}
+          >
+            ☰
+          </button>
+
+          <nav className={menuOpen ? "top-nav-links open" : "top-nav-links"}>
+            {topLinks.map(([href, label]) => {
+              const active = pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
+              return (
+                <Link key={href} href={href} className={active ? "active" : ""}>
+                  {label}
+                </Link>
+              );
+            })}
+          </nav>
+
+          <div className="top-nav-auth">
+            {user ? (
+              <>
+                <span>{user.fullName}</span>
+                <button type="button" onClick={clearStoredSession}>
+                  Logout
+                </button>
+              </>
+            ) : (
+              <>
+                <Link href="/auth/login">Login</Link>
+                <Link href="/auth/register">Register</Link>
+              </>
+            )}
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
+
+      <OnboardingModal isOpen={showOnboarding} onClose={finishOnboarding} />
+    </>
   );
 }
+

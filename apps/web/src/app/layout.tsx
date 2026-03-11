@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { AppFrame } from "@/components/AppFrame";
 import { Nav } from "@/components/Nav";
 import "./globals.css";
 
@@ -12,7 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <Nav />
-        <main className="container">{children}</main>
+        <AppFrame>{children}</AppFrame>
       </body>
     </html>
   );

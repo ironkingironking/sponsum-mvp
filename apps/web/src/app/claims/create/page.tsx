@@ -1,71 +1,45 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, SectionTitle } from "@sponsum/ui";
-import { ClaimCreationWizard } from "@/components/claims/ClaimCreationWizard";
-import { getStoredSession, subscribeToAuthChanges } from "@/lib/auth";
-import type { StructuredClaim } from "@/lib/claims";
+import { SimpleClaimWizard } from "@/components/claims/SimpleClaimWizard";
 
 export default function CreateClaimPage() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [lastCreatedClaimId, setLastCreatedClaimId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const updateAuth = () => setIsAuthenticated(Boolean(getStoredSession()?.token));
-    updateAuth();
-    return subscribeToAuthChanges(updateAuth);
-  }, []);
+  const [createdClaimId, setCreatedClaimId] = useState<string | null>(null);
 
   return (
-    <div className="grid" style={{ gap: 16 }}>
+    <div className="container grid" style={{ gap: 16 }}>
       <Card>
         <SectionTitle
-          title="Claim-Erstellung"
-          subtitle="Strukturierte Claims mit Referenzen auf Template-Felder, Klauselblöcke, Settlement-Events und Dokumentpflichten."
+          title="Create Claim"
+          subtitle="Simple 4-step flow: basic info, debtor details, security, then review."
         />
-        {!isAuthenticated ? (
-          <p style={{ margin: 0, color: "#475569" }}>
-            Für die Claim-Erstellung ist ein Login erforderlich.
-          </p>
-        ) : (
-          <p style={{ margin: 0, color: "#475569" }}>
-            Schrittweise Erstellung mit Snapshot-Logik und Blueprint-basierten Vorschlägen.
-          </p>
-        )}
+        <p style={{ margin: 0, color: "#475569" }}>
+          Keep it simple. You can add legal and technical details later.
+        </p>
       </Card>
 
-      {!isAuthenticated ? (
+      <SimpleClaimWizard onCreated={setCreatedClaimId} />
+
+      {createdClaimId ? (
         <Card>
-          <p style={{ margin: "0 0 10px", color: "#334155" }}>
-            Ohne aktive Session ist das Erstellen von Claims deaktiviert.
+          <p style={{ margin: "0 0 10px", color: "#166534" }}>
+            Claim created successfully: <strong>{createdClaimId}</strong>
           </p>
           <div style={{ display: "flex", gap: 8 }}>
-            <Link href="/auth/login">
-              <button type="button">Zum Login</button>
+            <Link href={`/claims/${createdClaimId}`}>
+              <button type="button">View claim</button>
             </Link>
-            <Link href="/auth/register">
-              <button type="button">Registrieren</button>
+            <Link href="/marketplace">
+              <button type="button" className="ghost">
+                Browse marketplace
+              </button>
             </Link>
           </div>
-        </Card>
-      ) : null}
-
-      {isAuthenticated ? (
-        <ClaimCreationWizard
-          onClaimCreated={(claim: StructuredClaim) => {
-            setLastCreatedClaimId(claim.id);
-          }}
-        />
-      ) : null}
-
-      {lastCreatedClaimId ? (
-        <Card>
-          <p style={{ margin: 0, color: "#166534" }}>
-            Claim erfolgreich erstellt: <strong>{lastCreatedClaimId}</strong>
-          </p>
         </Card>
       ) : null}
     </div>
   );
 }
+

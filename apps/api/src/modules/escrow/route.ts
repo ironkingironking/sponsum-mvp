@@ -4,11 +4,19 @@ import { escrowService } from "./service.js";
 export const escrowRouter = Router();
 
 escrowRouter.get("/arrangements", async (_req, res) => {
-  res.json(await escrowService.listAll());
+  try {
+    res.json(await escrowService.listAll());
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Cannot list escrow arrangements" });
+  }
 });
 
 escrowRouter.get("/:id/escrow", async (req, res) => {
-  res.json(await escrowService.listByClaim(req.params.id));
+  try {
+    res.json(await escrowService.listByClaim(req.params.id));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Cannot list claim escrow arrangements" });
+  }
 });
 
 escrowRouter.post("/:id/escrow", async (req, res) => {

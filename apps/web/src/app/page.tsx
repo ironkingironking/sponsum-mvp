@@ -1,36 +1,55 @@
 import Link from "next/link";
-import { CORE_TEMPLATES } from "@sponsum/shared";
 import { Card, SectionTitle } from "@sponsum/ui";
 
 export default function LandingPage() {
   return (
-    <div className="grid" style={{ gap: 20 }}>
+    <div className="container grid" style={{ gap: 20 }}>
       <Card>
         <SectionTitle
-          title="Sponsum: marketplace for claims and obligations"
-          subtitle="Modern and historical instruments in one modular engine, understandable for non-lawyers."
+          title="Trade financial claims in minutes"
+          subtitle="Create claims, find investors, and track settlement with clear risk and trust signals."
         />
         <p style={{ color: "#475569" }}>
-          Create, transfer, trade and settle invoice claims, bills of exchange, promissory notes, commenda-style venture
-          contracts, annuity/Gült structures, guaranteed obligations and custom private-law financing.
+          Sponsum helps you trade invoices, bills of exchange, future receivables, tax refunds and other claim-based deals
+          without legal complexity.
         </p>
-        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
-          <Link href="/marketplace"><button>Browse Marketplace</button></Link>
-          <Link href="/claims/create"><button style={{ background: "#2563eb" }}>Create Claim</button></Link>
+        <div className="primary-action-grid" style={{ marginTop: 12 }}>
+          <Link href="/claims/create" className="primary-action-card">
+            <strong>Create Claim</strong>
+            <p>Use the 4-step wizard and publish your deal.</p>
+          </Link>
+          <Link href="/marketplace" className="primary-action-card">
+            <strong>Invest in Claim</strong>
+            <p>Compare return, risk and issuer trust in one view.</p>
+          </Link>
+          <Link href="/deals" className="primary-action-card">
+            <strong>Track Settlement</strong>
+            <p>Follow each deal from created to settled.</p>
+          </Link>
         </div>
       </Card>
 
-      <Card>
-        <SectionTitle title="7 Core Templates" subtitle="Simple mode and advanced mode are built on the same engine." />
-        <div className="grid grid-2">
-          {CORE_TEMPLATES.map((tpl) => (
-            <div key={tpl.id} style={{ border: "1px solid #d7dce4", borderRadius: 10, padding: 12 }}>
-              <strong>{tpl.title}</strong>
-              <p style={{ color: "#475569", marginTop: 6 }}>{tpl.description}</p>
-            </div>
-          ))}
-        </div>
-      </Card>
+      <div className="grid grid-2">
+        <Card>
+          <SectionTitle title="How it works" subtitle="Understand the platform in 30 seconds." />
+          <ol style={{ margin: 0, paddingLeft: 18, color: "#334155" }}>
+            <li>Create a claim with basic details and debtor information.</li>
+            <li>Publish to the marketplace and receive investor interest.</li>
+            <li>Track funding, settlement and disputes in your timeline.</li>
+          </ol>
+        </Card>
+
+        <Card>
+          <SectionTitle title="Trust by default" subtitle="Every deal shows key safety indicators." />
+          <ul style={{ margin: 0, paddingLeft: 18, color: "#334155" }}>
+            <li>Verification badge and issuer rating</li>
+            <li>Risk light: green, yellow or red</li>
+            <li>Collateral and guarantor status</li>
+            <li>Dispute history and previous deal count</li>
+          </ul>
+        </Card>
+      </div>
     </div>
   );
 }
+

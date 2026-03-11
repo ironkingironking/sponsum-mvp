@@ -4,7 +4,11 @@ import { marketplaceService } from "./service.js";
 export const marketplaceRouter = Router();
 
 marketplaceRouter.get("/listings", async (_req, res) => {
-  res.json(await marketplaceService.listListings());
+  try {
+    res.json(await marketplaceService.listListings());
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Cannot list marketplace entries" });
+  }
 });
 
 marketplaceRouter.post("/listings", async (req, res) => {

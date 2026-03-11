@@ -4,9 +4,9 @@ import { Card, SectionTitle } from "@sponsum/ui";
 
 export default function TemplatesPage() {
   return (
-    <div className="grid" style={{ gap: 16 }}>
+    <div className="container grid" style={{ gap: 16 }}>
       <Card>
-        <SectionTitle title="Template Selection" subtitle="Choose one of 7 first-class financing templates." />
+        <SectionTitle title="Claim Types" subtitle="Pick a template and continue in the simple claim wizard." />
       </Card>
       <div className="grid grid-2">
         {CORE_TEMPLATES.map((tpl) => (
@@ -14,8 +14,8 @@ export default function TemplatesPage() {
             <strong>{tpl.title}</strong>
             <p style={{ color: "#475569" }}>{tpl.description}</p>
             <p style={{ fontSize: 13, color: "#64748b" }}>Roles: {tpl.requiredRoles.join(", ")}</p>
-            <Link href={`/claims/create/wizard/2?template=${tpl.id}`}>
-              <button style={{ marginTop: 8 }}>Use Template</button>
+            <Link href="/claims/create">
+              <button style={{ marginTop: 8 }}>Use template</button>
             </Link>
           </Card>
         ))}

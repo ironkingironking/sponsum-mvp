@@ -19,7 +19,11 @@ function extractBearerToken(header: string | undefined): string | null {
 }
 
 claimsRouter.get("/", async (_req, res) => {
-  res.json(await claimsService.list());
+  try {
+    res.json(await claimsService.list());
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to list claims" });
+  }
 });
 
 claimsRouter.post("/", async (req, res) => {
@@ -44,9 +48,13 @@ claimsRouter.post("/", async (req, res) => {
 });
 
 claimsRouter.get("/:id", async (req, res) => {
-  const claim = await claimsService.getById(req.params.id);
-  if (!claim) return res.status(404).json({ error: "Claim not found" });
-  res.json(claim);
+  try {
+    const claim = await claimsService.getById(req.params.id);
+    if (!claim) return res.status(404).json({ error: "Claim not found" });
+    res.json(claim);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to fetch claim" });
+  }
 });
 
 claimsRouter.patch("/:id", async (req, res) => {

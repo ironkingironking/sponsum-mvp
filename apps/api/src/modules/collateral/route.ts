@@ -4,11 +4,19 @@ import { collateralService } from "./service.js";
 export const collateralRouter = Router();
 
 collateralRouter.get("/records", async (_req, res) => {
-  res.json(await collateralService.listAll());
+  try {
+    res.json(await collateralService.listAll());
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Cannot list collateral records" });
+  }
 });
 
 collateralRouter.get("/:id/collateral", async (req, res) => {
-  res.json(await collateralService.listByClaim(req.params.id));
+  try {
+    res.json(await collateralService.listByClaim(req.params.id));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Cannot list claim collateral" });
+  }
 });
 
 collateralRouter.post("/:id/collateral", async (req, res) => {

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge, Card, SectionTitle } from "@sponsum/ui";
 import { ClaimLinkedClauseCard } from "@/components/claims/ClaimLinkedClauseCard";
@@ -11,7 +12,26 @@ import { formatCurrency, formatDateTime, severityToColor } from "@/lib/dashboard
 export default function ClaimDetailPage({ params }: { params: { id: string } }) {
   const claim = claimMocks.find((entry) => entry.id === params.id);
   if (!claim) {
-    notFound();
+    return (
+      <div className="container grid" style={{ gap: 16 }}>
+        <Card>
+          <SectionTitle title="Claim detail unavailable" subtitle="This deal is not part of local demo data." />
+          <p style={{ color: "#475569", margin: 0 }}>
+            You can still browse marketplace cards or create your own claim.
+          </p>
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <Link href="/marketplace">
+              <button type="button">Back to marketplace</button>
+            </Link>
+            <Link href="/claims/create">
+              <button type="button" className="ghost">
+                Create claim
+              </button>
+            </Link>
+          </div>
+        </Card>
+      </div>
+    );
   }
 
   const context = getInstrumentContextById(claim.instrumentId);
