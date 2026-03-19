@@ -86,6 +86,31 @@ export enum SettlementModel {
   CONDITIONAL = "CONDITIONAL"
 }
 
+export enum PartyRole {
+  SELLER = "seller",
+  BUYER = "buyer",
+  GUARANTOR = "guarantor",
+  ISSUER = "issuer",
+  DEBTOR = "debtor",
+  CREDITOR = "creditor",
+  INVESTOR = "investor",
+  OPERATOR = "operator",
+  COLLATERAL_PROVIDER = "collateral_provider",
+  DRAWER = "drawer",
+  DRAWEE = "drawee",
+  PAYEE = "payee",
+  BORROWER = "borrower",
+  LENDER = "lender",
+  BENEFICIARY = "beneficiary"
+}
+
+export enum TransactionLifecycleStep {
+  CREATE = "create",
+  FUND = "fund",
+  TRANSFER = "transfer",
+  SETTLE = "settle"
+}
+
 export type ClaimSummary = {
   id: UUID;
   title: string;

@@ -1,0 +1,36 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate build
+        run: |
+          npm run db:generate
+          npm run build
+
+      - name: Prepare Docker image tags
+        run: echo "IMAGE_TAG=staging-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Staging deploy placeholder
+        run: |
+          echo "Deploy staging image tag: ${IMAGE_TAG}"
+          echo "TODO: Add SSH/docker-compose rollout to your staging host"

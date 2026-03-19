@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { ClaimStatus, InstrumentType, ListingStatus, SettlementModel } from "./types";
+import { ClaimStatus, InstrumentType, ListingStatus, PartyRole, SettlementModel } from "./types";
 
 export const partySchema = z.object({
-  role: z.string().min(2),
+  role: z.nativeEnum(PartyRole),
   userId: z.string().optional(),
   displayName: z.string().min(2)
 });

@@ -1,0 +1,35 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate build
+        run: |
+          npm run db:generate
+          npm run build
+
+      - name: Production deploy placeholder
+        run: |
+          echo "Release commit: ${GITHUB_SHA}"
+          echo "TODO: Add protected prod deployment (Vercel + API host rollout)"

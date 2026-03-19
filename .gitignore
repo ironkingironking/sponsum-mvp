@@ -3,5 +3,10 @@ node_modules
 dist
 .env
 .env.local
+.env.staging
+.env.production
 coverage
 prisma/dev.db
+*.tsbuildinfo
+.vercel
+apps/web/.next.bak*

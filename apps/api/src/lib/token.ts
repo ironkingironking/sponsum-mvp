@@ -23,7 +23,11 @@ function base64UrlDecode(input: string): string {
 }
 
 function getAuthSecret(): string {
-  return process.env.AUTH_SECRET || "dev-auth-secret-change-me";
+  const secret = process.env.AUTH_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error("AUTH_SECRET must be set and at least 32 characters long");
+  }
+  return secret;
 }
 
 function sign(input: string): string {

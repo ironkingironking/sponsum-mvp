@@ -9,7 +9,10 @@
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace @sponsum/api\" \"npm run dev --workspace @sponsum/web\"",
     "build": "npm run build --workspace @sponsum/shared && npm run build --workspace @sponsum/ui && npm run build --workspace @sponsum/api && npm run build --workspace @sponsum/web",
-    "lint": "npm run lint --workspace @sponsum/api && npm run lint --workspace @sponsum/web",
+    "lint": "npm run lint --workspace @sponsum/api",
+    "typecheck": "npm run lint && npm run typecheck --workspace @sponsum/web",
+    "test": "npm -ws test --if-present",
+    "check": "npm run typecheck && npm run build",
     "db:generate": "prisma generate --schema prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema prisma/schema.prisma",
     "db:seed": "prisma db seed --schema prisma/schema.prisma"

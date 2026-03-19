@@ -1,32 +1,65 @@
-# Sponsum MVP Architecture
+# Sponsum Architecture
 
-## System Diagram
+## Runtime layout
 
-```mermaid
-flowchart LR
-  WEB["apps/web (Next.js)"] --> API["apps/api (Express)"]
-  API --> DB["PostgreSQL via Prisma"]
-  API --> SHARED["packages/shared (types/schemas)"]
-  WEB --> SHARED
-  WEB --> UI["packages/ui"]
-  API --> EVT["Event Engine"]
-  API --> SET["Settlement Engine"]
-  API --> DSP["Dispute Module"]
-  API --> TR["Trust Module"]
-  API --> COL["Collateral Registry"]
-  API --> ESC["Escrow Module"]
-  API --> CUS["Custody Module"]
-```
+- `apps/web`: Next.js operator UI
+- `apps/api`: Express API (application boundary)
+- `packages/shared`: cross-app types + schemas
+- `packages/ui`: shared UI package
+- `prisma`: relational data model
+- `infra`: deployment manifests (planned)
 
-## Wizard UX Flow
+## Layering inside API
 
-```mermaid
-flowchart TD
-  S1["Step 1: Choose Template"] --> S2["Step 2: Define Parties"]
-  S2 --> S3["Step 3: Economic Terms"]
-  S3 --> S4["Step 4: Settlement Rules"]
-  S4 --> S5["Step 5: Collateral / Guarantee / Escrow / Custody"]
-  S5 --> S6["Step 6: Dispute Mechanism"]
-  S6 --> S7["Step 7: Human-readable Summary"]
-  S7 --> S8["Step 8: Publish or Save Draft"]
-```
+- `modules/*/route.ts`: HTTP adapters
+- `modules/*/service.ts`: application/domain orchestration
+- `lib/*`: infrastructure helpers (env, token, prisma)
+
+This keeps transport, business logic, and infra concerns separable.
+
+## Domain map
+
+### Claims domain
+
+- claim creation and state management
+- template-driven authoring
+- dispute linkage
+
+### Marketplace domain
+
+- listing publication and fills
+- ownership fraction transfer
+
+### Transaction lifecycle domain (new)
+
+Explicit lifecycle for investor readability:
+
+1. `create` -> claim issued
+2. `fund` -> accepted/funded
+3. `transfer` -> active ownership transfer
+4. `settle` -> partial/full settlement
+
+Transition guards are centralized in `transaction-lifecycle/schemas.ts`.
+
+## Security baseline
+
+- typed env validation (`lib/env.ts`)
+- `helmet` headers
+- global rate limit
+- mandatory strong `AUTH_SECRET`
+- bearer-token protected write paths
+
+## Scalability path
+
+### MVP (now)
+
+Single API process + PostgreSQL.
+
+### Next split
+
+- `claims-service`
+- `marketplace-service`
+- `settlement-service`
+- async events via queue/outbox
+
+The new transaction lifecycle module is already isolated to become a standalone service later.
