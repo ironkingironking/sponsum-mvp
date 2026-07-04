@@ -1,9 +1,8 @@
-import type { Metadata } from "next";
 import { AppFrame } from "@/components/AppFrame";
 import { Nav } from "@/components/Nav";
 import "./globals.css";
 
-export const metadata: Metadata = {
+export const metadata = {
   title: "Sponsum MVP",
   description: "Marketplace for claims, obligations, guarantees, collateral and alternative financing"
 };

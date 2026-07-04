@@ -11,17 +11,27 @@
     "build": "npm run build --workspace @sponsum/shared && npm run build --workspace @sponsum/ui && npm run build --workspace @sponsum/api && npm run build --workspace @sponsum/web",
     "lint": "npm run lint --workspace @sponsum/api",
     "typecheck": "npm run lint && npm run typecheck --workspace @sponsum/web",
-    "test": "npm -ws test --if-present",
-    "check": "npm run typecheck && npm run build",
+    "test": "npm run test:unit",
+    "test:unit": "node --import tsx --test \"apps/**/*.test.ts\" \"packages/**/*.test.ts\"",
+    "test:integration": "node --import tsx --test \"apps/**/*.integration.ts\"",
+    "check": "npm run test && npm run typecheck && npm run build",
     "db:generate": "prisma generate --schema prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema prisma/schema.prisma",
+    "db:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
+    "db:push": "prisma db push --schema prisma/schema.prisma",
     "db:seed": "prisma db seed --schema prisma/schema.prisma"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
+    "postcss": "^8.5.10",
     "prisma": "^5.22.0",
-    "tsx": "^4.20.6",
+    "tsx": "^4.23.0",
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "^8.5.10"
+    }
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -1,22 +1,9 @@
 import { Router } from "express";
 import { claimsService } from "./service.js";
-import { verifyAuthToken } from "../../lib/token.js";
+import { getAuthenticatedUserId, requireAuth } from "../../lib/auth.js";
+import { errorResponse } from "../../lib/http-error.js";
 
 export const claimsRouter = Router();
-
-function extractBearerToken(header: string | undefined): string | null {
-  if (!header) {
-    return null;
-  }
-
-  const [scheme, token] = header.split(" ");
-
-  if (scheme?.toLowerCase() !== "bearer" || !token) {
-    return null;
-  }
-
-  return token;
-}
 
 claimsRouter.get("/", async (_req, res) => {
   try {
@@ -26,24 +13,13 @@ claimsRouter.get("/", async (_req, res) => {
   }
 });
 
-claimsRouter.post("/", async (req, res) => {
+claimsRouter.post("/", requireAuth, async (req, res) => {
   try {
-    const token = extractBearerToken(req.headers.authorization);
-
-    if (!token) {
-      return res.status(401).json({ error: "Authentication required" });
-    }
-
-    const payload = verifyAuthToken(token);
-
-    if (!payload) {
-      return res.status(401).json({ error: "Invalid or expired token" });
-    }
-
-    const created = await claimsService.create(req.body, payload.userId);
+    const created = await claimsService.create(req.body, getAuthenticatedUserId(req));
     res.status(201).json(created);
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : "Failed to create claim" });
+    const response = errorResponse(error, "Failed to create claim");
+    res.status(response.statusCode).json(response.body);
   }
 });
 
@@ -57,29 +33,32 @@ claimsRouter.get("/:id", async (req, res) => {
   }
 });
 
-claimsRouter.patch("/:id", async (req, res) => {
+claimsRouter.patch("/:id", requireAuth, async (req, res) => {
   try {
-    res.json(await claimsService.update(req.params.id, req.body));
+    res.json(await claimsService.update(req.params.id, req.body, getAuthenticatedUserId(req)));
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : "Failed to patch claim" });
+    const response = errorResponse(error, "Failed to patch claim");
+    res.status(response.statusCode).json(response.body);
   }
 });
 
-claimsRouter.post("/:id/publish", async (req, res) => {
+claimsRouter.post("/:id/publish", requireAuth, async (req, res) => {
   try {
-    res.json(await claimsService.publish(req.params.id, req.body));
+    res.json(await claimsService.publish(req.params.id, req.body, getAuthenticatedUserId(req)));
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : "Failed to publish" });
+    const response = errorResponse(error, "Failed to publish");
+    res.status(response.statusCode).json(response.body);
   }
 });
 
-claimsRouter.post("/:id/transfer", async (req, res) => {
+claimsRouter.post("/:id/transfer", requireAuth, async (req, res) => {
   try {
     const buyerId = String(req.body.buyerId || "");
     if (!buyerId) return res.status(400).json({ error: "buyerId is required" });
     const ownershipFraction = Number(req.body.ownershipFraction ?? 1);
-    res.json(await claimsService.transfer(req.params.id, buyerId, ownershipFraction));
+    res.json(await claimsService.transfer(req.params.id, getAuthenticatedUserId(req), buyerId, ownershipFraction));
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : "Failed to transfer" });
+    const response = errorResponse(error, "Failed to transfer");
+    res.status(response.statusCode).json(response.body);
   }
 });

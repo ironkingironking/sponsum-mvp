@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { verifyAuthToken } from "../../lib/token.js";
+import { getAuthenticatedUserId, requireAuth } from "../../lib/auth.js";
+import { errorResponse } from "../../lib/http-error.js";
 import {
   createTransactionSchema,
   fundTransactionSchema,
@@ -10,83 +11,47 @@ import { transactionLifecycleService } from "./service.js";
 
 export const transactionLifecycleRouter = Router();
 
-function extractBearerToken(header: string | undefined): string | null {
-  if (!header) return null;
-  const [scheme, token] = header.split(" ");
-  if (scheme?.toLowerCase() !== "bearer" || !token) {
-    return null;
-  }
-  return token;
-}
-
-function resolveUserId(header: string | undefined): string | null {
-  const token = extractBearerToken(header);
-  if (!token) return null;
-  const payload = verifyAuthToken(token);
-  return payload?.userId ?? null;
-}
-
-transactionLifecycleRouter.post("/api/v1/transactions/create", async (req, res) => {
+transactionLifecycleRouter.post("/api/v1/transactions/create", requireAuth, async (req, res) => {
   try {
-    const actorUserId = resolveUserId(req.headers.authorization);
-
-    if (!actorUserId) {
-      return res.status(401).json({ error: "Authentication required" });
-    }
-
     const payload = createTransactionSchema.parse(req.body);
-    const created = await transactionLifecycleService.create(payload, actorUserId);
+    const created = await transactionLifecycleService.create(payload, getAuthenticatedUserId(req));
     return res.status(201).json({ data: created });
   } catch (error) {
-    return res.status(400).json({ error: error instanceof Error ? error.message : "Invalid create transaction request" });
+    const response = errorResponse(error, "Invalid create transaction request");
+    return res.status(response.statusCode).json(response.body);
   }
 });
 
-transactionLifecycleRouter.post("/api/v1/transactions/:claimId/fund", async (req, res) => {
+transactionLifecycleRouter.post("/api/v1/transactions/:claimId/fund", requireAuth, async (req, res) => {
   try {
-    const actorUserId = resolveUserId(req.headers.authorization);
-
-    if (!actorUserId) {
-      return res.status(401).json({ error: "Authentication required" });
-    }
-
     const payload = fundTransactionSchema.parse(req.body);
-    const updated = await transactionLifecycleService.fund(req.params.claimId, payload, actorUserId);
+    const updated = await transactionLifecycleService.fund(req.params.claimId, payload, getAuthenticatedUserId(req));
     return res.json({ data: updated });
   } catch (error) {
-    return res.status(400).json({ error: error instanceof Error ? error.message : "Invalid fund request" });
+    const response = errorResponse(error, "Invalid fund request");
+    return res.status(response.statusCode).json(response.body);
   }
 });
 
-transactionLifecycleRouter.post("/api/v1/transactions/:claimId/transfer", async (req, res) => {
+transactionLifecycleRouter.post("/api/v1/transactions/:claimId/transfer", requireAuth, async (req, res) => {
   try {
-    const actorUserId = resolveUserId(req.headers.authorization);
-
-    if (!actorUserId) {
-      return res.status(401).json({ error: "Authentication required" });
-    }
-
     const payload = transferTransactionSchema.parse(req.body);
-    const updated = await transactionLifecycleService.transfer(req.params.claimId, payload, actorUserId);
+    const updated = await transactionLifecycleService.transfer(req.params.claimId, payload, getAuthenticatedUserId(req));
     return res.json({ data: updated });
   } catch (error) {
-    return res.status(400).json({ error: error instanceof Error ? error.message : "Invalid transfer request" });
+    const response = errorResponse(error, "Invalid transfer request");
+    return res.status(response.statusCode).json(response.body);
   }
 });
 
-transactionLifecycleRouter.post("/api/v1/transactions/:claimId/settle", async (req, res) => {
+transactionLifecycleRouter.post("/api/v1/transactions/:claimId/settle", requireAuth, async (req, res) => {
   try {
-    const actorUserId = resolveUserId(req.headers.authorization);
-
-    if (!actorUserId) {
-      return res.status(401).json({ error: "Authentication required" });
-    }
-
     const payload = settleTransactionSchema.parse(req.body);
-    const updated = await transactionLifecycleService.settle(req.params.claimId, payload, actorUserId);
+    const updated = await transactionLifecycleService.settle(req.params.claimId, payload, getAuthenticatedUserId(req));
     return res.json({ data: updated });
   } catch (error) {
-    return res.status(400).json({ error: error instanceof Error ? error.message : "Invalid settlement request" });
+    const response = errorResponse(error, "Invalid settlement request");
+    return res.status(response.statusCode).json(response.body);
   }
 });
 

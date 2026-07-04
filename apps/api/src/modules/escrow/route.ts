@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { getAuthenticatedUserId, requireAuth } from "../../lib/auth.js";
+import { errorResponse } from "../../lib/http-error.js";
 import { escrowService } from "./service.js";
 
 export const escrowRouter = Router();
@@ -19,10 +21,11 @@ escrowRouter.get("/:id/escrow", async (req, res) => {
   }
 });
 
-escrowRouter.post("/:id/escrow", async (req, res) => {
+escrowRouter.post("/:id/escrow", requireAuth, async (req, res) => {
   try {
-    res.status(201).json(await escrowService.createForClaim(req.params.id, req.body));
+    res.status(201).json(await escrowService.createForClaim(req.params.id, req.body, getAuthenticatedUserId(req)));
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : "Cannot create escrow arrangement" });
+    const response = errorResponse(error, "Cannot create escrow arrangement");
+    res.status(response.statusCode).json(response.body);
   }
 });

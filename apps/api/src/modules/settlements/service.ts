@@ -1,5 +1,7 @@
 import { prisma } from "../../lib/prisma.js";
 import { z } from "zod";
+import { assertCanActOnClaim } from "../../lib/claim-access.js";
+import { HttpError } from "../../lib/http-error.js";
 
 const settlementPayloadSchema = z.object({
   type: z.enum([
@@ -42,8 +44,14 @@ export const settlementsService = {
     return prisma.settlementEvent.findMany({ where: { claimId }, orderBy: { createdAt: "asc" } });
   },
 
-  async addEvent(claimId: string, rawPayload: unknown) {
+  async addEvent(claimId: string, rawPayload: unknown, actorUserId: string) {
+    await assertCanActOnClaim(claimId, actorUserId);
+
     const payload = settlementPayloadSchema.parse(rawPayload);
+
+    if (payload.claimantId && payload.claimantId !== actorUserId) {
+      throw new HttpError("Settlement event claimant must match authenticated user", 403);
+    }
 
     const created = await prisma.$transaction(async (tx) => {
       const settlement = await tx.settlementEvent.create({
@@ -68,6 +76,7 @@ export const settlementsService = {
       await tx.eventLog.create({
         data: {
           claimId,
+          actorId: actorUserId,
           eventType: payload.type.toLowerCase(),
           payload
         }
@@ -77,7 +86,7 @@ export const settlementsService = {
         const dispute = await tx.disputeCase.create({
           data: {
             relatedClaimId: claimId,
-            claimantId: payload.claimantId,
+            claimantId: actorUserId,
             respondentId: payload.respondentId,
             disputeType: "NON_PAYMENT",
             disputeReason: payload.disputeReason || "Automatic dispute opened after default event",
@@ -94,7 +103,7 @@ export const settlementsService = {
         await tx.eventLog.create({
           data: {
             claimId,
-            actorId: payload.claimantId,
+            actorId: actorUserId,
             eventType: "dispute_opened",
             payload: { disputeId: dispute.id, source: "default_triggered" }
           }

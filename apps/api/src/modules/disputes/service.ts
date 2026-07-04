@@ -1,9 +1,11 @@
 import { prisma } from "../../lib/prisma.js";
 import { z } from "zod";
+import { assertCanActOnClaim } from "../../lib/claim-access.js";
+import { HttpError } from "../../lib/http-error.js";
 
 const createDisputeSchema = z.object({
   relatedClaimId: z.string().min(1),
-  claimantId: z.string().min(1),
+  claimantId: z.string().min(1).optional(),
   respondentId: z.string().min(1),
   disputeType: z.enum([
     "NON_PAYMENT",
@@ -38,14 +40,19 @@ export const disputesService = {
     });
   },
 
-  async create(rawPayload: unknown) {
+  async create(rawPayload: unknown, actorUserId: string) {
     const payload = createDisputeSchema.parse(rawPayload);
+    await assertCanActOnClaim(payload.relatedClaimId, actorUserId);
+
+    if (payload.claimantId && payload.claimantId !== actorUserId) {
+      throw new HttpError("Dispute claimant must match authenticated user", 403);
+    }
 
     const created = await prisma.$transaction(async (tx) => {
       const dispute = await tx.disputeCase.create({
         data: {
           relatedClaimId: payload.relatedClaimId,
-          claimantId: payload.claimantId,
+          claimantId: actorUserId,
           respondentId: payload.respondentId,
           disputeType: payload.disputeType,
           disputeReason: payload.disputeReason,
@@ -62,7 +69,7 @@ export const disputesService = {
       await tx.eventLog.create({
         data: {
           claimId: payload.relatedClaimId,
-          actorId: payload.claimantId,
+          actorId: actorUserId,
           eventType: "dispute_opened",
           payload: { disputeId: dispute.id }
         }
@@ -81,11 +88,20 @@ export const disputesService = {
     });
   },
 
-  async respond(id: string, rawPayload: unknown) {
+  async respond(id: string, rawPayload: unknown, actorUserId: string) {
     const payload = respondDisputeSchema.parse(rawPayload);
     const dispute = await prisma.disputeCase.findUnique({ where: { id } });
     if (!dispute) {
-      throw new Error("Dispute not found");
+      throw new HttpError("Dispute not found", 404);
+    }
+
+    const canRespond =
+      dispute.claimantId === actorUserId ||
+      dispute.respondentId === actorUserId ||
+      dispute.mediatorId === actorUserId;
+
+    if (!canRespond) {
+      throw new HttpError("You are not allowed to respond to this dispute", 403);
     }
 
     return prisma.$transaction(async (tx) => {
@@ -116,6 +132,7 @@ export const disputesService = {
       await tx.eventLog.create({
         data: {
           claimId: dispute.relatedClaimId,
+          actorId: actorUserId,
           eventType: payload.status === "RESOLVED" ? "dispute_resolved" : "dispute_updated",
           payload
         }

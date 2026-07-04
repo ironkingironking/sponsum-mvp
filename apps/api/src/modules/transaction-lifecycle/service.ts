@@ -1,4 +1,5 @@
 import { ClaimStatus } from "@sponsum/shared";
+import { assertCanActOnClaim } from "../../lib/claim-access.js";
 import { prisma } from "../../lib/prisma.js";
 import type {
   CreateTransactionInput,
@@ -86,6 +87,8 @@ export const transactionLifecycleService = {
   },
 
   async fund(claimId: string, payload: FundTransactionInput, actorUserId: string) {
+    await assertCanActOnClaim(claimId, actorUserId);
+
     return prisma.$transaction(async (tx) => {
       const claim = await tx.claim.findUnique({ where: { id: claimId } });
 
@@ -133,6 +136,8 @@ export const transactionLifecycleService = {
   },
 
   async transfer(claimId: string, payload: TransferTransactionInput, actorUserId: string) {
+    await assertCanActOnClaim(claimId, actorUserId);
+
     return prisma.$transaction(async (tx) => {
       const claim = await tx.claim.findUnique({ where: { id: claimId } });
 
@@ -180,6 +185,8 @@ export const transactionLifecycleService = {
   },
 
   async settle(claimId: string, payload: SettleTransactionInput, actorUserId: string) {
+    await assertCanActOnClaim(claimId, actorUserId);
+
     return prisma.$transaction(async (tx) => {
       const claim = await tx.claim.findUnique({ where: { id: claimId } });
 

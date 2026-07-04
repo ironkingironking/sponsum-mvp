@@ -25,12 +25,77 @@ jobs:
       - name: Validate build
         run: |
           npm run db:generate
+          npm run test:unit
           npm run build
 
       - name: Prepare Docker image tags
         run: echo "IMAGE_TAG=staging-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
-      - name: Staging deploy placeholder
+      - name: Validate deployment secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.STAGING_SSH_USER }}
+          DEPLOY_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          DEPLOY_PATH: ${{ secrets.STAGING_DEPLOY_PATH }}
+          ENV_FILE: ${{ secrets.STAGING_ENV_FILE }}
         run: |
-          echo "Deploy staging image tag: ${IMAGE_TAG}"
-          echo "TODO: Add SSH/docker-compose rollout to your staging host"
+          test -n "$DEPLOY_HOST" || (echo "Missing STAGING_SSH_HOST" && exit 1)
+          test -n "$DEPLOY_USER" || (echo "Missing STAGING_SSH_USER" && exit 1)
+          test -n "$DEPLOY_KEY" || (echo "Missing STAGING_SSH_KEY" && exit 1)
+          test -n "$DEPLOY_PATH" || (echo "Missing STAGING_DEPLOY_PATH" && exit 1)
+          test -n "$ENV_FILE" || (echo "Missing STAGING_ENV_FILE" && exit 1)
+
+      - name: Configure SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          DEPLOY_KEY: ${{ secrets.STAGING_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/sponsum_deploy_key
+          chmod 600 ~/.ssh/sponsum_deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload staging environment
+        env:
+          DEPLOY_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.STAGING_SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.STAGING_DEPLOY_PATH }}
+          ENV_FILE: ${{ secrets.STAGING_ENV_FILE }}
+        run: |
+          printf '%s\n' "$ENV_FILE" | ssh -i ~/.ssh/sponsum_deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+            "mkdir -p '$DEPLOY_PATH' && cat > '$DEPLOY_PATH/.env'"
+
+      - name: Roll out staging
+        env:
+          DEPLOY_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.STAGING_SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.STAGING_DEPLOY_PATH }}
+        run: |
+          ssh -i ~/.ssh/sponsum_deploy_key "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' -- "$DEPLOY_PATH" "$GITHUB_SHA" <<'EOF'
+          set -euo pipefail
+          DEPLOY_PATH="$1"
+          TARGET_SHA="$2"
+
+          cd "$DEPLOY_PATH"
+          test -d .git || (echo "$DEPLOY_PATH must contain a git checkout of the Sponsum repository" && exit 1)
+
+          git fetch --all --prune
+          git reset --hard "$TARGET_SHA"
+
+          docker compose build api web
+          docker compose up -d postgres
+          docker compose run --rm api npm run db:deploy
+          docker compose up -d api web
+          docker compose ps
+          EOF
+
+      - name: Check staging health
+        env:
+          STAGING_HEALTH_URL: ${{ secrets.STAGING_HEALTH_URL }}
+        run: |
+          if [ -n "$STAGING_HEALTH_URL" ]; then
+            curl --fail --show-error --silent "$STAGING_HEALTH_URL"
+          else
+            echo "Skipping staging health check because STAGING_HEALTH_URL is not set."
+          fi

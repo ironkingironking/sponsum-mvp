@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Card, SectionTitle } from "@sponsum/ui";
+import { MarketplaceInvestButton } from "@/components/marketplace/MarketplaceInvestButton";
 import { apiGet } from "@/lib/api";
 
 type Listing = {
@@ -37,6 +38,7 @@ type MarketplaceCardModel = {
   collateralStatus: string;
   disputeHistory: string;
   status: string;
+  isLive: boolean;
 };
 
 function toNumber(value: string): number {
@@ -77,7 +79,7 @@ function amountLabel(value: number, currency: string): string {
   return new Intl.NumberFormat("de-CH", { style: "currency", currency, maximumFractionDigits: 0 }).format(value);
 }
 
-function buildMarketplaceModel(listing: Listing, index: number): MarketplaceCardModel {
+function buildMarketplaceModel(listing: Listing, index: number, isLive: boolean): MarketplaceCardModel {
   const amount = toNumber(listing.claim.amount);
   const ask = toNumber(listing.askPrice);
   const expectedReturn = ask > 0 ? ((amount - ask) / ask) * 100 : 0;
@@ -99,7 +101,8 @@ function buildMarketplaceModel(listing: Listing, index: number): MarketplaceCard
     previousDeals: 3 + index * 2,
     collateralStatus: riskLevel === "red" ? "No collateral" : riskLevel === "yellow" ? "Partial collateral" : "Collateral verified",
     disputeHistory: index % 3 === 0 ? "No disputes" : "1 resolved dispute",
-    status: listing.status
+    status: listing.status,
+    isLive
   };
 }
 
@@ -156,7 +159,9 @@ const exampleListings: Listing[] = [
 
 export default async function MarketplacePage() {
   const listings = await apiGet<Listing[]>("/marketplace/listings").catch(() => []);
-  const rows = (listings.length ? listings : exampleListings).map(buildMarketplaceModel);
+  const rows = listings.length
+    ? listings.map((listing, index) => buildMarketplaceModel(listing, index, true))
+    : exampleListings.map((listing, index) => buildMarketplaceModel(listing, index, false));
 
   return (
     <div className="container grid" style={{ gap: 16 }}>
@@ -219,7 +224,7 @@ export default async function MarketplacePage() {
                     View details
                   </button>
                 </Link>
-                <button type="button">Invest</button>
+                <MarketplaceInvestButton listingId={row.id} status={row.status} disabled={!row.isLive} />
               </div>
             </Card>
           ))}
