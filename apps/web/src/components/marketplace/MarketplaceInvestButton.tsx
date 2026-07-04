@@ -8,9 +8,10 @@ type MarketplaceInvestButtonProps = {
   listingId: string;
   disabled?: boolean;
   status: string;
+  onSuccess?: () => void;
 };
 
-export function MarketplaceInvestButton({ listingId, disabled = false, status }: MarketplaceInvestButtonProps) {
+export function MarketplaceInvestButton({ listingId, disabled = false, status, onSuccess }: MarketplaceInvestButtonProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const router = useRouter();
@@ -42,6 +43,7 @@ export function MarketplaceInvestButton({ listingId, disabled = false, status }:
       }
 
       setMessage("Investment recorded.");
+      onSuccess?.();
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not invest.");
