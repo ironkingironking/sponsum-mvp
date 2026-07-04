@@ -381,6 +381,144 @@ button.ghost {
   color: #fff;
 }
 
+.deals-shell {
+  display: grid;
+  gap: 16px;
+}
+
+.deals-shell .summary-value {
+  font-size: 26px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.deal-workbench-header,
+.deal-section-head,
+.deal-card-head,
+.deal-card-actions,
+.deal-alert {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.deal-view-switch {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid #d7dce4;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.deal-view-switch a {
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.deal-view-switch a.active {
+  background: #0f172a;
+  color: #fff;
+}
+
+.status-pill.deal-phase-open {
+  background: #e0f2fe;
+  border-color: #7dd3fc;
+  color: #075985;
+}
+
+.status-pill.deal-phase-owned {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #166534;
+}
+
+.status-pill.deal-phase-settling {
+  background: #fef9c3;
+  border-color: #fde68a;
+  color: #854d0e;
+}
+
+.status-pill.deal-phase-disputed,
+.status-pill.deal-phase-defaulted {
+  background: #fee2e2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+.status-pill.deal-phase-paid {
+  background: #e0e7ff;
+  border-color: #c7d2fe;
+  color: #3730a3;
+}
+
+.deal-card-head p,
+.deal-section-head p,
+.deal-empty p,
+.deal-alert p {
+  margin: 4px 0 0;
+  color: #64748b;
+}
+
+.deal-card-head strong,
+.deal-section-head h3 {
+  margin: 0;
+}
+
+.deal-metric-grid {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.deal-metric-grid div {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fafc;
+  display: grid;
+  gap: 4px;
+}
+
+.deal-metric-grid span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.deal-metric-grid strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.deal-card-actions {
+  margin-top: 12px;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.deal-section {
+  display: grid;
+  gap: 10px;
+}
+
+.deal-section-head {
+  align-items: center;
+}
+
+.deal-empty {
+  display: grid;
+  gap: 10px;
+}
+
+.deal-alert {
+  align-items: center;
+}
+
 .onboarding-overlay {
   position: fixed;
   inset: 0;
