@@ -1,3 +1,4 @@
+import { assertCanActOnClaim } from "../../lib/claim-access.js";
 import { prisma } from "../../lib/prisma.js";
 
 export const escrowService = {
@@ -9,7 +10,9 @@ export const escrowService = {
     return prisma.escrowArrangement.findMany({ where: { relatedClaimId: claimId }, orderBy: { createdAt: "desc" } });
   },
 
-  async createForClaim(claimId: string, payload: any) {
+  async createForClaim(claimId: string, payload: any, actorUserId: string) {
+    await assertCanActOnClaim(claimId, actorUserId);
+
     return prisma.escrowArrangement.create({
       data: {
         relatedClaimId: claimId,

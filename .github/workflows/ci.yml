@@ -9,6 +9,25 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sponsum
+          POSTGRES_PASSWORD: sponsum
+          POSTGRES_DB: sponsum_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sponsum -d sponsum_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://sponsum:sponsum@localhost:5432/sponsum_test?schema=public
+      AUTH_SECRET: ci-test-secret-with-at-least-32-chars
+      CORS_ORIGIN: http://localhost:3000
 
     steps:
       - name: Checkout
@@ -26,8 +45,14 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
-      - name: Lint + typecheck
-        run: npm run lint
+      - name: Apply database migrations
+        run: npm run db:deploy
+
+      - name: Test + typecheck
+        run: |
+          npm run test:unit
+          npm run test:integration
+          npm run typecheck
 
       - name: Build monorepo
         run: npm run build

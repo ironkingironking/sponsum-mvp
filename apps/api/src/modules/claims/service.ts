@@ -1,5 +1,7 @@
 import { ClaimStatus, ListingStatus, createClaimSchema, publishClaimSchema } from "@sponsum/shared";
 import type { Prisma } from "@prisma/client";
+import { assertCanManageClaim } from "../../lib/claim-access.js";
+import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
 
 export const claimsService = {
@@ -63,7 +65,9 @@ export const claimsService = {
     });
   },
 
-  async update(id: string, patch: Record<string, unknown>) {
+  async update(id: string, patch: Record<string, unknown>, actorUserId: string) {
+    await assertCanManageClaim(id, actorUserId);
+
     return prisma.claim.update({
       where: { id },
       data: {
@@ -80,8 +84,10 @@ export const claimsService = {
     });
   },
 
-  async publish(id: string, payload: unknown) {
+  async publish(id: string, payload: unknown, actorUserId: string) {
     const data = publishClaimSchema.parse(payload);
+    await assertCanManageClaim(id, actorUserId);
+
     const claim = await prisma.claim.update({
       where: { id },
       data: {
@@ -89,7 +95,7 @@ export const claimsService = {
         isPartialTradable: data.isPartialAllowed,
         listings: {
           create: {
-            sellerId: (payload as { sellerId: string }).sellerId,
+            sellerId: actorUserId,
             status: data.listingStatus as ListingStatus,
             askPrice: data.askPrice,
             transferConditions: "default transfer conditions"
@@ -104,14 +110,16 @@ export const claimsService = {
     return claim;
   },
 
-  async transfer(id: string, buyerId: string, ownershipFraction = 1) {
+  async transfer(id: string, actorUserId: string, buyerId: string, ownershipFraction = 1) {
+    await assertCanManageClaim(id, actorUserId);
+
     const claim = await prisma.claim.findUnique({ where: { id } });
-    if (!claim) throw new Error("Claim not found");
+    if (!claim) throw new HttpError("Claim not found", 404);
 
     await prisma.eventLog.create({
       data: {
         claimId: id,
-        actorId: buyerId,
+        actorId: actorUserId,
         eventType: "claim_transferred",
         payload: { buyerId, ownershipFraction }
       }
