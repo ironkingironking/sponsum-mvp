@@ -441,6 +441,55 @@ test("dispute, settlement and assignment dossiers are addressable", () => {
   assert.throws(() => service.assignmentDossier("zes-missing"), (error: DomainError) => error.code === "not_found");
 });
 
+test("capital, accounting, identity and factor dossiers are addressable", () => {
+  const service = new SponsumService();
+  const book = service.workspace();
+
+  const created = service.createCapitalNeed({
+    seeker_party_id: "seller-ui",
+    kind: "EQUITY",
+    amount: "250000",
+    purpose: "Wachstum"
+  });
+  const needPack = service.capitalNeedDossier(created.need.need_id);
+  assert.equal(needPack.need.need_id, created.need.need_id);
+  assert.equal(needPack.need.purpose, "Wachstum");
+  assert.ok(needPack.matches.length >= 1);
+  assert.throws(() => service.capitalNeedDossier("kap-missing"), (error: DomainError) => error.code === "not_found");
+
+  const provider = service.listCapitalProviders()[0];
+  assert.ok(provider);
+  const providerPack = service.capitalProviderDossier(provider.provider_id);
+  assert.equal(providerPack.provider.provider_id, provider.provider_id);
+  assert.equal(providerPack.provider.display_name, provider.display_name);
+  assert.throws(
+    () => service.capitalProviderDossier("inv-missing"),
+    (error: DomainError) => error.code === "not_found"
+  );
+
+  assert.ok(book.accounting.length >= 1);
+  const proposal = book.accounting[0];
+  const acc = service.accountingDossier(proposal.proposal_id);
+  assert.equal(acc.proposal.proposal_id, proposal.proposal_id);
+  assert.equal(acc.proposal.receivable_id, proposal.receivable_id);
+  assert.ok(acc.asset);
+  assert.equal(acc.asset!.receivable_id, proposal.receivable_id);
+  assert.throws(() => service.accountingDossier("acc-missing"), (error: DomainError) => error.code === "not_found");
+
+  const party = service.identityDossier("buyer-1");
+  assert.equal(party.party_id, "buyer-1");
+  assert.equal(party.kyc?.status, "PASSED");
+  assert.ok(party.profile);
+  assert.throws(() => service.identityDossier("nobody-unknown"), (error: DomainError) => error.code === "not_found");
+
+  const factor = service.factors()[0];
+  assert.ok(factor);
+  const factorPack = service.factorDossier(factor.node_id);
+  assert.equal(factorPack.node.node_id, factor.node_id);
+  assert.equal(factorPack.node.kind, factor.kind);
+  assert.throws(() => service.factorDossier("factor-missing"), (error: DomainError) => error.code === "not_found");
+});
+
 test("workspace seeds demo book and dossier exposes verification + lock", () => {
   const service = new SponsumService();
   const first = service.workspace();

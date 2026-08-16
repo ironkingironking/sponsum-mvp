@@ -75,6 +75,10 @@ sponsumRouter.get("/factors", (_req, res) => {
   handle(() => sponsumService.factors(), res);
 });
 
+sponsumRouter.get("/factors/:id", (req, res) => {
+  handle(() => sponsumService.factorDossier(req.params.id), res);
+});
+
 sponsumRouter.get("/policies", (_req, res) => {
   handle(() => sponsumService.policies(), res);
 });
@@ -252,8 +256,28 @@ sponsumRouter.get("/capital/providers", (_req, res) => {
   handle(() => sponsumService.listCapitalProviders(), res);
 });
 
+sponsumRouter.get("/capital/providers/:id", (req, res) => {
+  handle(() => sponsumService.capitalProviderDossier(req.params.id), res);
+});
+
 sponsumRouter.get("/capital/needs", (_req, res) => {
   handle(() => sponsumService.listCapitalNeeds(), res);
+});
+
+sponsumRouter.get("/capital/needs/:id", (req, res) => {
+  handle(() => sponsumService.capitalNeedDossier(req.params.id), res);
+});
+
+sponsumRouter.get("/accounting", (_req, res) => {
+  handle(() => sponsumService.listAccounting(), res);
+});
+
+sponsumRouter.get("/accounting/:id", (req, res) => {
+  handle(() => sponsumService.accountingDossier(req.params.id), res);
+});
+
+sponsumRouter.get("/identity/:id", (req, res) => {
+  handle(() => sponsumService.identityDossier(req.params.id), res);
 });
 
 sponsumRouter.post("/capital/needs", (req, res) => {

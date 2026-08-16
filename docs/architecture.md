@@ -2,8 +2,8 @@
 
 ## Runtime layout
 
-- `apps/web`: Next.js operator UI
-- `apps/api`: Express API (application boundary)
+- `apps/web`: Next.js operator UI (not the Suite `/sponsum/` entry)
+- `apps/api`: Express API + live hash desk (`public/sponsum/`, see [live-desk.md](./live-desk.md))
 - `packages/shared`: cross-app types + schemas
 - `packages/ui`: shared UI package
 - `prisma`: relational data model

@@ -244,9 +244,13 @@ function navKey() {
   if (hash.startsWith("#/receivables/")) return "receivables";
   if (hash.startsWith("#/wechsel")) return "wechsel";
   if (hash.startsWith("#/market/")) return "market";
+  if (hash.startsWith("#/factors/")) return "market";
   if (hash.startsWith("#/disputes/")) return "disputes";
   if (hash.startsWith("#/settlement/")) return "settlement";
   if (hash.startsWith("#/zession/")) return "zession";
+  if (hash.startsWith("#/capital/")) return "capital";
+  if (hash.startsWith("#/accounting/")) return "accounting";
+  if (hash.startsWith("#/identity/")) return "identity";
   return hash.replace("#/", "").split("/")[0] || "hub";
 }
 
@@ -277,6 +281,16 @@ async function route() {
     if (settlement) return renderSettlementDossier(decodeURIComponent(settlement[1]));
     const zession = hash.match(/^#\/zession\/([^/?]+)/);
     if (zession) return renderZessionDossier(decodeURIComponent(zession[1]));
+    const capitalNeed = hash.match(/^#\/capital\/need\/([^/?]+)/);
+    if (capitalNeed) return renderCapitalNeedDossier(decodeURIComponent(capitalNeed[1]));
+    const capitalProvider = hash.match(/^#\/capital\/provider\/([^/?]+)/);
+    if (capitalProvider) return renderCapitalProviderDossier(decodeURIComponent(capitalProvider[1]));
+    const accounting = hash.match(/^#\/accounting\/([^/?]+)/);
+    if (accounting) return renderAccountingDossier(decodeURIComponent(accounting[1]));
+    const identity = hash.match(/^#\/identity\/([^/?]+)/);
+    if (identity) return renderIdentityDossier(decodeURIComponent(identity[1]));
+    const factor = hash.match(/^#\/factors\/([^/?]+)/);
+    if (factor) return renderFactorDossier(decodeURIComponent(factor[1]));
     const views = {
       hub: renderHub,
       receivables: renderReceivables,
@@ -1329,8 +1343,8 @@ function renderCapital() {
           <tbody>
             ${(workspace.capital_providers || [])
               .map(
-                (row) => `<tr>
-                  <td>${esc(row.display_name)}<br><span class="muted">${labelOf(row.kind)}</span></td>
+                (row) => `<tr class="clickable" data-href="#/capital/provider/${row.provider_id}">
+                  <td><a href="#/capital/provider/${row.provider_id}">${esc(row.display_name)}</a><br><span class="muted">${labelOf(row.kind)}</span></td>
                   <td>${row.offers.map(capitalKindLabel).join(", ")}</td>
                   <td class="num">${formatChf(row.tickets_min)}–${formatChf(row.tickets_max)}</td>
                 </tr>`
@@ -1345,9 +1359,10 @@ function renderCapital() {
         const matches = matchProviders(need);
         const asked = interests.filter((row) => row.need_id === need.need_id);
         return `<section class="card">
-          <h2>${capitalKindLabel(need.kind)} ${formatChf(need.amount, need.currency)} ${badge(need.status)}</h2>
+          <h2><a href="#/capital/need/${need.need_id}">${capitalKindLabel(need.kind)} ${formatChf(need.amount, need.currency)}</a> ${badge(need.status)}</h2>
           <p>${esc(need.purpose)}${need.tenor_months ? ` · ${need.tenor_months} Monate` : ""} · ${esc(partyLabel(need.seeker_party_id))}</p>
           <p class="muted">${esc(need.legal_note)}</p>
+          <p><a href="#/capital/need/${need.need_id}">Dossier öffnen</a></p>
           ${
             matches.length
               ? `<table>
@@ -1357,7 +1372,7 @@ function renderCapital() {
                       .map((row) => {
                         const done = asked.find((item) => item.provider_id === row.provider_id);
                         return `<tr>
-                          <td>${esc(row.display_name)}<br><span class="muted">${labelOf(row.kind)} · ${esc(row.regulatory_status)}</span></td>
+                          <td><a href="#/capital/provider/${row.provider_id}">${esc(row.display_name)}</a><br><span class="muted">${labelOf(row.kind)} · ${esc(row.regulatory_status)}</span></td>
                           <td>${esc(row.public_blurb)}</td>
                           <td>${
                             done
@@ -1389,7 +1404,12 @@ function renderCapital() {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(form).entries());
     data.amount = String(data.amount).replace(/'/g, "");
-    act(() => api("/capital/needs", { method: "POST", body: JSON.stringify(data) }));
+    act(() =>
+      api("/capital/needs", { method: "POST", body: JSON.stringify(data) }).then((created) => {
+        const id = created && created.need && created.need.need_id;
+        if (id) window.location.hash = `#/capital/need/${id}`;
+      })
+    );
   });
   document.querySelectorAll("[data-intro]").forEach((button) => {
     button.addEventListener("click", () =>
@@ -1403,6 +1423,7 @@ function renderCapital() {
       )
     );
   });
+  bindClickableRows();
 }
 
 function renderMarket() {
@@ -1445,8 +1466,8 @@ function renderMarket() {
           ${(workspace.capital_public || []).length
             ? (workspace.capital_public || [])
                 .map(
-                  (row) => `<tr>
-                    <td>${labelOf(row.kind)}</td>
+                  (row) => `<tr class="clickable" data-href="#/capital/need/${row.need_id}">
+                    <td><a href="#/capital/need/${row.need_id}">${labelOf(row.kind)}</a></td>
                     <td class="num">${formatChf(row.amount, row.currency)}</td>
                     <td>${row.tenor_months ? `${row.tenor_months} Monate` : "Beteiligung"}</td>
                     <td>${esc(row.sector)} ${esc(row.country)}</td>
@@ -1464,8 +1485,8 @@ function renderMarket() {
         <tbody>
           ${workspace.factors
             .map(
-              (row) => `<tr>
-                <td>${row.node_id}</td><td>${row.kind}</td><td>${row.regulatory_status}</td>
+              (row) => `<tr class="clickable" data-href="#/factors/${row.node_id}">
+                <td><a href="#/factors/${row.node_id}">${row.node_id}</a></td><td>${row.kind}</td><td>${row.regulatory_status}</td>
                 <td>${row.currencies.join(", ")}</td><td class="num">${formatChf(row.min_invoice)}–${formatChf(row.max_invoice)}</td>
                 <td>${row.pricing_api ? "ja" : "nein"}</td>
               </tr>`
@@ -1475,12 +1496,7 @@ function renderMarket() {
       </table>
     </section>
   `;
-  main.querySelectorAll("tr[data-href]").forEach((row) => {
-    row.addEventListener("click", (event) => {
-      if (event.target.closest("a")) return;
-      window.location.hash = row.getAttribute("data-href");
-    });
-  });
+  bindClickableRows();
 }
 
 async function renderOfferDetail(offerId) {
@@ -1878,10 +1894,11 @@ function renderAccounting() {
       .map(
         (row) => `
       <section class="card">
-        <h2>${row.proposal_id} · ${row.standard} · ${badge(row.status)}</h2>
+        <h2><a href="#/accounting/${row.proposal_id}">${row.proposal_id}</a> · ${row.standard} · ${badge(row.status)}</h2>
         <table>
           ${row.lines.map((line) => `<tr><td>${line.account}</td><td class="num">Soll ${formatChf(line.debit)}</td><td class="num">Haben ${formatChf(line.credit)}</td><td>${line.memo}</td></tr>`).join("")}
         </table>
+        <p><a href="#/accounting/${row.proposal_id}">Dossier öffnen</a></p>
       </section>`
       )
       .join("") || `<section class="card"><p>Noch keine Vorschläge.</p></section>`}
@@ -1972,17 +1989,251 @@ function renderIdentity() {
     <section class="card">
       <h2>KYC</h2>
       <table>
-        ${workspace.kyc.map((row) => `<tr><td>${row.party_id}</td><td>${badge(row.status)}</td></tr>`).join("")}
+        ${workspace.kyc
+          .map(
+            (row) => `<tr class="clickable" data-href="#/identity/${encodeURIComponent(row.party_id)}">
+          <td><a href="#/identity/${encodeURIComponent(row.party_id)}">${esc(row.party_id)}</a></td>
+          <td>${badge(row.status)}</td>
+        </tr>`
+          )
+          .join("")}
       </table>
     </section>
     <section class="card">
       <h2>Investment-Profil</h2>
       ${workspace.buyer_profiles
         .map(
-          (row) => `<p>${row.party_id}: ${row.country} ${row.currency}, Rating ≥ ${row.min_debtor_rating}, max. ${row.max_maturity_days} Tage, max. ${formatChf(row.max_single_position, row.currency)}, min. ${row.min_expected_yield}% · ausgeschlossen: ${row.sector_exclusions.join(", ") || "–"}</p>`
+          (row) => `<p><a href="#/identity/${encodeURIComponent(row.party_id)}">${esc(row.party_id)}</a>: ${row.country} ${row.currency}, Rating ≥ ${row.min_debtor_rating}, max. ${row.max_maturity_days} Tage, max. ${formatChf(row.max_single_position, row.currency)}, min. ${row.min_expected_yield}% · ausgeschlossen: ${row.sector_exclusions.join(", ") || "–"}</p>`
         )
         .join("")}
       <p class="muted">Profile dienen der Suche und dem Abgleich. Automatische Käufe bleiben gesperrt.</p>
+    </section>
+  `;
+  bindClickableRows();
+}
+
+async function renderCapitalNeedDossier(id) {
+  let pack;
+  try {
+    pack = await api(`/capital/needs/${encodeURIComponent(id)}`);
+  } catch (error) {
+    main.innerHTML = notFoundCard("Kapitalsuche", error.message, "#/capital", "Kapital");
+    return;
+  }
+  const need = pack.need;
+  const asked = pack.interests || [];
+  main.innerHTML = `
+    <p class="muted"><a href="#/capital">← Kapital</a></p>
+    <h1>${capitalKindLabel(need.kind)} ${formatChf(need.amount, need.currency)}</h1>
+    <p class="lead">${esc(need.purpose)}${need.tenor_months ? ` · ${need.tenor_months} Monate` : ""} · ${esc(partyLabel(need.seeker_party_id))} · ${badge(need.status)}</p>
+    ${errorLine()}
+    <section class="card">
+      <h2>Bedarf</h2>
+      <p>${esc(need.legal_note)}</p>
+      <p>Branche ${esc(need.sector)} · ${esc(need.country)} · ${need.need_id}</p>
+    </section>
+    <section class="card">
+      <h2>Passende Parteien</h2>
+      ${(pack.matches || []).length
+        ? `<table>
+            <thead><tr><th>Partei</th><th>Profil</th><th></th></tr></thead>
+            <tbody>
+              ${pack.matches
+                .map((row) => {
+                  const done = asked.find((item) => item.provider_id === row.provider_id);
+                  return `<tr>
+                    <td><a href="#/capital/provider/${row.provider_id}">${esc(row.display_name)}</a><br><span class="muted">${labelOf(row.kind)}</span></td>
+                    <td>${esc(row.public_blurb)}</td>
+                    <td>${
+                      done
+                        ? badge(done.status)
+                        : `<button type="button" data-intro="${need.need_id}" data-provider="${row.provider_id}">Gespräch anfragen</button>`
+                    }</td>
+                  </tr>`;
+                })
+                .join("")}
+            </tbody>
+          </table>`
+        : "<p class=\"muted\">Kein Treffer in diesem Ticket- oder Laufzeitband.</p>"}
+    </section>
+    <section class="card">
+      <h2>Protokoll</h2>
+      ${eventTable(pack.events)}
+    </section>
+  `;
+  document.querySelectorAll("[data-intro]").forEach((button) => {
+    button.addEventListener("click", () =>
+      act(
+        () =>
+          api(`/capital/needs/${button.getAttribute("data-intro")}/interest`, {
+            method: "POST",
+            body: JSON.stringify({ provider_id: button.getAttribute("data-provider") })
+          }),
+        "Bilaterales Gespräch anfragen? Sponsum schliesst keinen Vertrag und nimmt kein Geld entgegen."
+      )
+    );
+  });
+}
+
+async function renderCapitalProviderDossier(id) {
+  let pack;
+  try {
+    pack = await api(`/capital/providers/${encodeURIComponent(id)}`);
+  } catch (error) {
+    main.innerHTML = notFoundCard("Kapitalgeber", error.message, "#/capital", "Kapital");
+    return;
+  }
+  const row = pack.provider;
+  main.innerHTML = `
+    <p class="muted"><a href="#/capital">← Kapital</a></p>
+    <h1>${esc(row.display_name)}</h1>
+    <p class="lead">${labelOf(row.kind)} · ${esc(row.regulatory_status)}</p>
+    ${errorLine()}
+    <section class="card">
+      <h2>Profil</h2>
+      <p>${esc(row.public_blurb)}</p>
+      <p>Bietet ${row.offers.map(capitalKindLabel).join(", ")}<br>
+      Ticket ${formatChf(row.tickets_min)}–${formatChf(row.tickets_max)} · ${row.currencies.join(", ")} · ${row.countries.join(", ")}
+      ${row.max_tenor_months ? `<br>max. ${row.max_tenor_months} Monate` : ""}</p>
+    </section>
+    <section class="card">
+      <h2>Passende Gesuche</h2>
+      ${(pack.matching_needs || []).length
+        ? pack.matching_needs
+            .map(
+              (need) =>
+                `<p><a href="#/capital/need/${need.need_id}">${capitalKindLabel(need.kind)} ${formatChf(need.amount, need.currency)}</a> ${badge(need.status)} · ${esc(need.purpose)}</p>`
+            )
+            .join("")
+        : "<p class=\"muted\">Kein offenes Gesuch in diesem Ticketband.</p>"}
+    </section>
+  `;
+}
+
+async function renderAccountingDossier(id) {
+  let pack;
+  try {
+    pack = await api(`/accounting/${encodeURIComponent(id)}`);
+  } catch (error) {
+    main.innerHTML = notFoundCard("Buchungsvorschlag", error.message, "#/accounting", "Buchung");
+    return;
+  }
+  const row = pack.proposal;
+  main.innerHTML = `
+    <p class="muted"><a href="#/accounting">← Buchung</a>${
+      pack.asset ? ` · <a href="#/receivables/${pack.asset.receivable_id}">Forderung</a>` : ""
+    }</p>
+    <h1>${esc(row.proposal_id)}</h1>
+    <p class="lead">${esc(row.standard)} · ${badge(row.status)}</p>
+    ${errorLine()}
+    <section class="card">
+      <h2>Buchungssätze</h2>
+      <table>
+        ${row.lines
+          .map(
+            (line) =>
+              `<tr><td>${esc(line.account)}</td><td class="num">Soll ${formatChf(line.debit)}</td><td class="num">Haben ${formatChf(line.credit)}</td><td>${esc(line.memo)}</td></tr>`
+          )
+          .join("")}
+      </table>
+      <p class="muted">Forderung ${row.receivable_id} · Event ${row.event_id}</p>
+    </section>
+    <section class="card">
+      <h2>Protokoll</h2>
+      ${eventTable(pack.events)}
+    </section>
+  `;
+}
+
+async function renderIdentityDossier(id) {
+  let pack;
+  try {
+    pack = await api(`/identity/${encodeURIComponent(id)}`);
+  } catch (error) {
+    main.innerHTML = notFoundCard("Partei", error.message, "#/identity", "Identität");
+    return;
+  }
+  main.innerHTML = `
+    <p class="muted"><a href="#/identity">← Identität</a></p>
+    <h1>${esc(pack.party_id)}</h1>
+    <p class="lead">KYC ${pack.kyc ? badge(pack.kyc.status) : badge("NONE")}</p>
+    ${errorLine()}
+    <div class="grid-2">
+      <section class="card">
+        <h2>KYC</h2>
+        <p>${pack.kyc ? badge(pack.kyc.status) : "Kein KYC-Datensatz."}</p>
+        ${
+          pack.profile
+            ? `<p>${pack.profile.country} ${pack.profile.currency}, Rating ≥ ${pack.profile.min_debtor_rating}, max. ${pack.profile.max_maturity_days} Tage, max. ${formatChf(pack.profile.max_single_position, pack.profile.currency)}, min. ${pack.profile.min_expected_yield}%</p>
+               <p class="muted">Ausgeschlossen: ${(pack.profile.sector_exclusions || []).join(", ") || "–"}</p>`
+            : "<p class=\"muted\">Kein Investment-Profil.</p>"
+        }
+      </section>
+      <section class="card">
+        <h2>Rollen</h2>
+        ${pack.provider ? `<p>Kapitalgeber <a href="#/capital/provider/${pack.provider.provider_id}">${esc(pack.provider.display_name)}</a></p>` : ""}
+        ${pack.factor ? `<p>Factor-Node <a href="#/factors/${pack.factor.node_id}">${pack.factor.node_id}</a></p>` : ""}
+        ${!pack.provider && !pack.factor ? "<p class=\"muted\">Keine Katalogrolle.</p>" : ""}
+      </section>
+    </div>
+    <section class="card">
+      <h2>Forderungen</h2>
+      ${(pack.receivables || []).length
+        ? pack.receivables
+            .map(
+              (row) =>
+                `<p><a href="#/receivables/${row.receivable_id}">${row.receivable_id}</a> ${badge(row.status)} · ${formatChf(row.nominal_amount, row.currency)}</p>`
+            )
+            .join("")
+        : "<p class=\"muted\">Keine verknüpften Forderungen.</p>"}
+    </section>
+    ${
+      (pack.trades || []).length
+        ? `<section class="card"><h2>Abschlüsse</h2>${pack.trades
+            .map((row) => `<p><a href="#/settlement/${row.trade_id}">${row.trade_id}</a> ${badge(row.status)}</p>`)
+            .join("")}</section>`
+        : ""
+    }
+  `;
+}
+
+async function renderFactorDossier(id) {
+  let pack;
+  try {
+    pack = await api(`/factors/${encodeURIComponent(id)}`);
+  } catch (error) {
+    main.innerHTML = notFoundCard("Factor-Node", error.message, "#/market", "Marktplatz");
+    return;
+  }
+  const node = pack.node;
+  main.innerHTML = `
+    <p class="muted"><a href="#/market">← Marktplatz</a> · <a href="#/identity/${encodeURIComponent(node.node_id)}">Identität</a></p>
+    <h1>${esc(node.node_id)}</h1>
+    <p class="lead">${esc(node.kind)} · ${esc(node.regulatory_status)} · ${esc(node.jurisdiction)}</p>
+    ${errorLine()}
+    <section class="card">
+      <h2>Ticket</h2>
+      <p>${formatChf(node.min_invoice)}–${formatChf(node.max_invoice)} · ${node.currencies.join(", ")}</p>
+      <p>Pricing API: ${node.pricing_api ? "ja" : "nein"} · KYC ${pack.kyc ? badge(pack.kyc.status) : badge("NONE")}</p>
+    </section>
+    <section class="card">
+      <h2>Abschlüsse</h2>
+      ${(pack.trades || []).length
+        ? pack.trades
+            .map(
+              (row) =>
+                `<p><a href="#/settlement/${row.trade_id}">${row.trade_id}</a> ${badge(row.status)} · ${formatChf(row.purchase_price, row.currency)}</p>`
+            )
+            .join("")
+        : "<p class=\"muted\">Keine Abschlüsse mit diesem Node.</p>"}
+    </section>
+    <section class="card">
+      <h2>Forderungen</h2>
+      ${(pack.receivables || []).length
+        ? pack.receivables
+            .map((row) => `<p><a href="#/receivables/${row.receivable_id}">${row.receivable_id}</a> ${badge(row.status)}</p>`)
+            .join("")
+        : "<p class=\"muted\">Keine gehaltenen Forderungen.</p>"}
     </section>
   `;
 }

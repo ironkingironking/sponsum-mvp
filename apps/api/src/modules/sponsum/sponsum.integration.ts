@@ -117,6 +117,141 @@ test("HTTP dispute and settlement dossiers 404 or resolve from workspace", async
       const settle = await fetch(`${base}/api/sponsum/v1/settlements/${book.settlements[0].instruction_id}`);
       assert.equal(settle.status, 200);
     }
+
+    for (const path of [
+      "/capital/needs/kap-missing",
+      "/capital/providers/inv-missing",
+      "/accounting/acc-missing",
+      "/identity/nobody-unknown",
+      "/factors/factor-missing"
+    ]) {
+      const res = await fetch(`${base}/api/sponsum/v1${path}`);
+      assert.equal(res.status, 404, path);
+    }
+
+    let needId = "";
+    const needsRes = await fetch(`${base}/api/sponsum/v1/capital/needs`);
+    assert.equal(needsRes.status, 200);
+    const needs = (await needsRes.json()) as Array<{ need_id: string }>;
+    if (needs[0]) {
+      needId = needs[0].need_id;
+    } else {
+      const created = await fetch(`${base}/api/sponsum/v1/capital/needs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "EQUITY", amount: "250000", purpose: "HTTP dossier", seeker_party_id: "seller-ui" })
+      });
+      assert.equal(created.status, 200);
+      const body = (await created.json()) as { need: { need_id: string } };
+      needId = body.need.need_id;
+    }
+    const need = await fetch(`${base}/api/sponsum/v1/capital/needs/${needId}`);
+    assert.equal(need.status, 200);
+    const needPack = (await need.json()) as { need: { need_id: string } };
+    assert.equal(needPack.need.need_id, needId);
+
+    const providers = await fetch(`${base}/api/sponsum/v1/capital/providers`);
+    assert.equal(providers.status, 200);
+    const providerRows = (await providers.json()) as Array<{ provider_id: string }>;
+    assert.ok(providerRows[0]);
+    const provider = await fetch(`${base}/api/sponsum/v1/capital/providers/${providerRows[0].provider_id}`);
+    assert.equal(provider.status, 200);
+    const providerPack = (await provider.json()) as { provider: { provider_id: string } };
+    assert.equal(providerPack.provider.provider_id, providerRows[0].provider_id);
+
+    const ws = (await (await fetch(`${base}/api/sponsum/v1/workspace`)).json()) as {
+      accounting: Array<{ proposal_id: string }>;
+      kyc: Array<{ party_id: string }>;
+      factors: Array<{ node_id: string }>;
+    };
+    let proposalId = ws.accounting[0]?.proposal_id ?? "";
+    if (!proposalId) {
+      const json = { "Content-Type": "application/json" };
+      await fetch(`${base}/api/sponsum/v1/kyc/seller-dossier`, {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ status: "PASSED" })
+      });
+      await fetch(`${base}/api/sponsum/v1/kyc/buyer-1`, {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ status: "PASSED" })
+      });
+      const recRes = await fetch(`${base}/api/sponsum/v1/receivables`, {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({
+          invoice_id: `INV-ACC-${Date.now()}`,
+          nominal_amount: "15000",
+          issue_date: "2026-08-01",
+          maturity_date: "2026-09-15",
+          creditor_party_id: "seller-dossier",
+          debtor_party_id: "debtor-dossier",
+          evidence: {
+            hasInvoice: true,
+            invoiceElectronic: true,
+            hasContract: true,
+            hasDelivery: true,
+            unpaid: true,
+            hasDispute: false,
+            creditorKyc: true,
+            debtorKyc: true
+          }
+        })
+      });
+      assert.equal(recRes.status, 200);
+      const rec = (await recRes.json()) as { receivable_id: string };
+      const offerRes = await fetch(`${base}/api/sponsum/v1/receivables/${rec.receivable_id}/offers`, {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ seller_party_id: "seller-dossier", min_price: "14500" })
+      });
+      assert.equal(offerRes.status, 200);
+      const offer = (await offerRes.json()) as { offer_id: string };
+      const bidRes = await fetch(`${base}/api/sponsum/v1/offers/${offer.offer_id}/bids`, {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ buyer_party_id: "buyer-1", amount: "14600" })
+      });
+      assert.equal(bidRes.status, 200);
+      const bid = (await bidRes.json()) as { bid_id: string };
+      const tradeRes = await fetch(`${base}/api/sponsum/v1/bids/${bid.bid_id}/accept`, {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ seller_party_id: "seller-dossier" })
+      });
+      assert.equal(tradeRes.status, 200);
+      const trade = (await tradeRes.json()) as { trade_id: string };
+      const settlePack = (await (await fetch(`${base}/api/sponsum/v1/trades/${trade.trade_id}`)).json()) as {
+        instruction: { instruction_id: string };
+      };
+      const confirm = await fetch(
+        `${base}/api/sponsum/v1/settlements/${settlePack.instruction.instruction_id}/provider-confirm`,
+        { method: "POST", headers: json, body: JSON.stringify({ provider: "external-psp" }) }
+      );
+      assert.equal(confirm.status, 200);
+      const accList = (await (await fetch(`${base}/api/sponsum/v1/accounting`)).json()) as Array<{
+        proposal_id: string;
+      }>;
+      proposalId = accList[0]?.proposal_id ?? "";
+    }
+    assert.ok(proposalId);
+    const acc = await fetch(`${base}/api/sponsum/v1/accounting/${proposalId}`);
+    assert.equal(acc.status, 200);
+    const accPack = (await acc.json()) as { proposal: { proposal_id: string } };
+    assert.equal(accPack.proposal.proposal_id, proposalId);
+
+    assert.ok(ws.kyc[0]);
+    const ident = await fetch(`${base}/api/sponsum/v1/identity/${encodeURIComponent(ws.kyc[0].party_id)}`);
+    assert.equal(ident.status, 200);
+    const identPack = (await ident.json()) as { party_id: string };
+    assert.equal(identPack.party_id, ws.kyc[0].party_id);
+
+    assert.ok(ws.factors[0]);
+    const factor = await fetch(`${base}/api/sponsum/v1/factors/${ws.factors[0].node_id}`);
+    assert.equal(factor.status, 200);
+    const factorPack = (await factor.json()) as { node: { node_id: string } };
+    assert.equal(factorPack.node.node_id, ws.factors[0].node_id);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }

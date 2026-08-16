@@ -1,5 +1,12 @@
 # Sponsum API (MVP)
 
+The **live Suite desk** (`https://suite.movena.ch/sponsum/`) uses
+`/api/sponsum/v1` as documented in [live-desk.md](./live-desk.md), including
+dossier GETs and HTTP 404 for unknown ids.
+
+The routes below describe the unused claims/Next.js MVP (`http://localhost:4000`),
+not what Suite proxies today.
+
 Base URL: `http://localhost:4000`
 
 ## Auth

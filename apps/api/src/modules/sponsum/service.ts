@@ -1807,6 +1807,103 @@ export class SponsumService {
     };
   }
 
+  capitalNeedDossier(id: string) {
+    const key = decodeURIComponent(id);
+    const need = this.listCapitalNeeds().find((row) => row.need_id === key);
+    if (!need) throw new DomainError("not_found", "Kapitalsuche nicht gefunden");
+    const state = this.store.snapshot();
+    return {
+      need,
+      matches: this.matchCapitalProviders(need),
+      interests: state.capital_interests.filter((row) => row.need_id === need.need_id),
+      events: state.events.filter((event) => String(event.payload?.need_id ?? "") === need.need_id)
+    };
+  }
+
+  capitalProviderDossier(id: string) {
+    const key = decodeURIComponent(id);
+    const provider = CAPITAL_PROVIDERS.find((row) => row.provider_id === key);
+    if (!provider) throw new DomainError("not_found", "Investor oder Gläubiger nicht gefunden");
+    const state = this.store.snapshot();
+    const matching_needs = state.capital_needs.filter((need) =>
+      this.matchCapitalProviders(need).some((row) => row.provider_id === provider.provider_id)
+    );
+    return {
+      provider,
+      matching_needs,
+      interests: state.capital_interests.filter((row) => row.provider_id === provider.provider_id)
+    };
+  }
+
+  listAccounting() {
+    return this.store.snapshot().accounting;
+  }
+
+  accountingDossier(id: string) {
+    const key = decodeURIComponent(id);
+    const state = this.store.snapshot();
+    const proposal = state.accounting.find((row) => row.proposal_id === key);
+    if (!proposal) throw new DomainError("not_found", "Buchungsvorschlag nicht gefunden");
+    const asset = state.assets.find((row) => row.receivable_id === proposal.receivable_id) ?? null;
+    return {
+      proposal,
+      asset,
+      events: state.events.filter(
+        (event) => event.receivable_id === proposal.receivable_id || event.event_id === proposal.event_id
+      )
+    };
+  }
+
+  identityDossier(id: string) {
+    const key = decodeURIComponent(id);
+    const state = this.store.snapshot();
+    const kyc = state.kyc.find((row) => row.party_id === key) ?? null;
+    const profile = state.buyer_profiles.find((row) => row.party_id === key) ?? null;
+    const provider = CAPITAL_PROVIDERS.find((row) => row.provider_id === key) ?? null;
+    const factor = FACTOR_NODES.find((row) => row.node_id === key) ?? null;
+    const receivables = state.assets.filter(
+      (asset) =>
+        asset.debtor_party_id === key ||
+        asset.creditor_party_id === key ||
+        asset.current_holder_party_id === key
+    );
+    const assignments = state.assignments.filter(
+      (row) =>
+        row.transferor_party_id === key ||
+        row.transferee_party_id === key ||
+        row.debtor_party_id === key
+    );
+    const trades = state.trades.filter((row) => row.seller_party_id === key || row.buyer_party_id === key);
+    if (!kyc && !profile && !provider && !factor && !receivables.length && !assignments.length && !trades.length) {
+      throw new DomainError("not_found", "Partei nicht gefunden");
+    }
+    return {
+      party_id: key,
+      kyc,
+      profile,
+      provider,
+      factor,
+      receivables,
+      assignments,
+      trades
+    };
+  }
+
+  factorDossier(id: string) {
+    const key = decodeURIComponent(id);
+    const node = FACTOR_NODES.find((row) => row.node_id === key);
+    if (!node) throw new DomainError("not_found", "Factor-Node nicht gefunden");
+    const state = this.store.snapshot();
+    return {
+      node,
+      kyc: state.kyc.find((row) => row.party_id === key) ?? null,
+      trades: state.trades.filter((row) => row.buyer_party_id === key || row.seller_party_id === key),
+      receivables: state.assets.filter(
+        (asset) => asset.current_holder_party_id === key || asset.creditor_party_id === key
+      )
+    };
+  }
+
   events(receivableId?: string) {
     const state = this.store.snapshot();
     return receivableId
