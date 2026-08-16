@@ -1,0 +1,256 @@
+:root {
+  --ink: #17212b;
+  --muted: #5b6775;
+  --line: #d8dee6;
+  --surface: #fff;
+  --page: #f5f7fa;
+  --soft: #eef5fc;
+  --brand: #1d4f91;
+  --ok: #047857;
+  --warn: #a16207;
+  --danger: #b91c1c;
+  --rail: #152033;
+  --radius: 8px;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body.sp-app {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: var(--page);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.sp-shell {
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sp-rail {
+  background: var(--rail);
+  color: #e5edf7;
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sp-back {
+  color: #9fb0c3;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sp-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  background: var(--brand);
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.sp-brand {
+  margin: 4px 0 10px;
+  font-weight: 700;
+}
+
+.sp-rail nav { display: grid; gap: 2px; }
+.sp-rail a {
+  color: #d5deea;
+  text-decoration: none;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.sp-rail a.is-active,
+.sp-rail a:hover { background: rgba(255,255,255,0.08); color: #fff; }
+
+.sp-main { padding: 22px 24px 40px; max-width: 1180px; }
+
+h1 { margin: 0 0 6px; font-size: 22px; }
+h2 { margin: 0 0 10px; font-size: 16px; }
+.lead, .muted { color: var(--muted); }
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+.kpi, .card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.kpi strong { display: block; font-size: 22px; }
+.kpi span { color: var(--muted); font-size: 12px; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+
+button, .btn {
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: var(--brand);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+button.ghost, .btn.ghost { background: #e8eef5; color: var(--ink); }
+button.danger { background: var(--danger); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover td { background: var(--soft); }
+.kv { display: grid; grid-template-columns: 150px 1fr; gap: 6px 12px; margin: 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #e8eef5;
+}
+.badge.ok { background: #d1fae5; color: var(--ok); }
+.badge.warn { background: #fef3c7; color: var(--warn); }
+.badge.danger { background: #fee2e2; color: var(--danger); }
+.badge.deny { background: #fee2e2; color: var(--danger); }
+.badge.flag { background: #fef3c7; color: var(--warn); }
+.badge.allow { background: #d1fae5; color: var(--ok); }
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1.3fr 0.7fr;
+  gap: 12px;
+}
+@media (max-width: 900px) {
+  .sp-shell { grid-template-columns: 1fr; }
+  .grid-2 { grid-template-columns: 1fr; }
+}
+
+form.stack { display: grid; gap: 8px; }
+label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+input, select, textarea {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--ink);
+}
+
+.checks { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 13px; }
+.check-ok { color: var(--ok); }
+.check-no { color: var(--danger); }
+
+.error { color: var(--danger); }
+.mono { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+
+.note {
+  border-left: 3px solid var(--brand);
+  padding: 8px 10px;
+  background: var(--soft);
+  border-radius: 0 6px 6px 0;
+}
+
+.wechsel-paper {
+  position: relative;
+  background: #fffdf8;
+  border: 1px solid #c9b99a;
+  border-radius: 2px;
+  padding: 22px 24px 18px;
+  font-family: "Palatino Linotype", Palatino, "Times New Roman", serif;
+  color: #1a1510;
+  min-height: 360px;
+}
+.wechsel-paper .wb-stamp {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  border: 2px solid var(--danger);
+  color: var(--danger);
+  font-family: system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+  transform: rotate(8deg);
+}
+.wechsel-paper .wb-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  border-bottom: 1px solid #1a1510;
+  padding-bottom: 8px;
+  margin-bottom: 16px;
+}
+.wechsel-paper h3 { margin: 0; font-size: 20px; letter-spacing: 0.06em; }
+.wechsel-paper .wb-head small { display: block; margin-top: 4px; line-height: 1.35; }
+.wechsel-paper .wb-sum {
+  font-size: 20px;
+  font-weight: 700;
+}
+.wechsel-paper .wb-clause { margin: 0 0 16px; line-height: 1.55; font-size: 15px; }
+.wechsel-paper .wb-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 20px;
+  font-size: 13px;
+  margin-bottom: 22px;
+}
+.wechsel-paper .wb-grid span { display: block; color: #6b6258; font-size: 11px; }
+.wechsel-paper .wb-sign {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-top: 28px;
+}
+.wechsel-paper .wb-line {
+  border-top: 1px solid #1a1510;
+  padding-top: 6px;
+  font-size: 12px;
+}
+.wb-disclaimer {
+  margin-top: 14px;
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--danger);
+}
+.wb-side {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+table.wb-fn td:last-child { white-space: nowrap; }
+table.wb-fn button, table.wb-fn .btn { margin: 0 0 0 4px; }
