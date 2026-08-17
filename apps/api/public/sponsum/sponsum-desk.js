@@ -277,8 +277,7 @@ async function route() {
     if (offer) return renderOfferDetail(decodeURIComponent(offer[1]));
     const dispute = hash.match(/^#\/disputes\/([^/?]+)/);
     if (dispute) return renderDisputeDossier(decodeURIComponent(dispute[1]));
-    const settlement = hash.match(/^#\/settlement\/([^/?]+)/);
-    if (settlement) return renderSettlementDossier(decodeURIComponent(settlement[1]));
+    if (hash === "#/settlement" || hash.startsWith("#/settlement/")) return renderSettlement();
     const zession = hash.match(/^#\/zession\/([^/?]+)/);
     if (zession) return renderZessionDossier(decodeURIComponent(zession[1]));
     const capitalNeed = hash.match(/^#\/capital\/need\/([^/?]+)/);
@@ -362,6 +361,101 @@ function disputeHref(row) {
 function settlementHref(row) {
   const id = row.trade_id || row.trade?.trade_id || row.instruction_id;
   return id ? `#/settlement/${encodeURIComponent(id)}` : "#/settlement";
+}
+
+function settlementKey(row) {
+  return String(row.trade_id || row.trade?.trade_id || row.instruction_id || "");
+}
+
+function settlementPanelHtml(pack) {
+  const trade = pack.trade;
+  const inst = pack.instruction;
+  const pending = inst && (inst.status === "ISSUED" || inst.status === "SEEN");
+  return `
+    <p class="settle-id"><strong>${esc(trade.trade_id)}</strong> · ${esc(partyLabel(trade.seller_party_id))} → ${esc(partyLabel(trade.buyer_party_id))} · ${badge(trade.status)}</p>
+    <div class="grid-2">
+      <div>
+        <p>Nominal ${formatChf(trade.nominal_amount, trade.currency)} · Kaufpreis ${formatChf(trade.purchase_price, trade.currency)}</p>
+        ${
+          inst
+            ? `<p>Zahlen Sie ${formatChf(inst.amount, inst.currency)} an ${formatIban(inst.payee_iban)}<br>
+               Referenz <span class="mono">${esc(inst.payment_reference)}</span> · Anweisung ${badge(inst.status)}<br>
+               Zahler ${esc(partyLabel(inst.payer_party_id))} · Empfänger ${esc(partyLabel(inst.payee_party_id))}</p>
+               <p class="note">Die Übertragung erfolgt erst nach Bestätigung des Zahlungsproviders.</p>
+               ${pending ? `<button type="button" data-confirm="${inst.instruction_id}">Zahlungseingang übernehmen</button>` : ""}`
+            : `<p class="muted">Keine Zahlungsanweisung.</p>`
+        }
+      </div>
+      <div>
+        <p>Forderung <a href="#/receivables/${trade.receivable_id}">${trade.receivable_id}</a>
+        ${pack.asset ? ` · Rechnung ${esc(pack.asset.invoice_id)} ${badge(pack.asset.status)}` : ""}</p>
+        ${pack.offer ? `<p>Angebot <a href="#/market/${pack.offer.offer_id}">${pack.offer.offer_id}</a> ${badge(pack.offer.status)}</p>` : ""}
+        ${
+          pack.assignment
+            ? `<p>Zession <a href="#/zession/${pack.assignment.assignment_id}">${pack.assignment.assignment_id}</a> ${badge(pack.assignment.status)}</p>`
+            : `<p class="muted">Kein Zessionsvertrag — reiner Forderungskauf / Liquidität.</p>`
+        }
+        ${
+          pack.observation
+            ? `<p>Provider ${esc(pack.observation.provider)} · ${formatChf(pack.observation.observed_amount, pack.observation.observed_currency)} · ${formatDate(pack.observation.observed_at)}</p>`
+            : `<p class="muted">Noch keine Provider-Meldung.</p>`
+        }
+        <p><a href="#/receivables/${trade.receivable_id}">Zur Forderung</a></p>
+      </div>
+    </div>
+    <details class="settle-events" open>
+      <summary>Protokoll</summary>
+      ${eventTable(pack.events)}
+    </details>
+  `;
+}
+
+async function fillSettlementPanel(panel, id) {
+  panel.innerHTML = `<p class="muted" role="status">Wird geladen…</p>`;
+  try {
+    const pack = await api(`/settlements/${encodeURIComponent(id)}`);
+    panel.innerHTML = settlementPanelHtml(pack);
+    panel.querySelectorAll("[data-confirm]").forEach((button) => {
+      button.addEventListener("click", () =>
+        act(
+          () =>
+            api(`/settlements/${button.getAttribute("data-confirm")}/provider-confirm`, {
+              method: "POST",
+              body: JSON.stringify({ provider: "external-psp" })
+            }),
+          "Zahlungseingang übernehmen und das Asset übertragen? Dieser Schritt ist nicht umkehrbar."
+        )
+      );
+    });
+  } catch (error) {
+    panel.innerHTML = `<p class="error">${esc(error.message)}</p>`;
+  }
+}
+
+async function toggleSettlementRow(row, forceOpen) {
+  const key = row.getAttribute("data-settle");
+  const detail = document.getElementById(`settle-panel-${key}`);
+  const button = row.querySelector(".settle-toggle");
+  const open = forceOpen === true || (forceOpen !== false && detail.hasAttribute("hidden"));
+  document.querySelectorAll("tr.settle-row.is-open").forEach((other) => {
+    if (other === row) return;
+    other.classList.remove("is-open");
+    const otherBtn = other.querySelector(".settle-toggle");
+    if (otherBtn) otherBtn.setAttribute("aria-expanded", "false");
+    const otherDetail = document.getElementById(`settle-panel-${other.getAttribute("data-settle")}`);
+    if (otherDetail) otherDetail.hidden = true;
+  });
+  row.classList.toggle("is-open", open);
+  if (button) button.setAttribute("aria-expanded", open ? "true" : "false");
+  if (!detail) return;
+  detail.hidden = !open;
+  if (open) {
+    const panel = detail.querySelector("[data-settle-panel]");
+    if (panel && !panel.getAttribute("data-loaded")) {
+      panel.setAttribute("data-loaded", "1");
+      await fillSettlementPanel(panel, key);
+    }
+  }
 }
 
 async function act(run, confirmText) {
@@ -1590,9 +1684,11 @@ function renderPortfolio() {
 
 function renderSettlement() {
   const open = workspace.settlements.filter((row) => row.status === "ISSUED" || row.status === "SEEN");
+  const hashId = (window.location.hash.match(/^#\/settlement\/([^/?]+)/) || [])[1];
+  const expandId = hashId ? decodeURIComponent(hashId) : "";
   main.innerHTML = `
     <h1>Abrechnung</h1>
-    <p class="lead">Der Käufer zahlt den Verkäufer direkt (IBAN und Referenz). Sponsum überträgt das Asset erst nach der Provider-Meldung — nicht über einen «bezahlt»-Klick.</p>
+    <p class="lead">Der Käufer zahlt den Verkäufer direkt (IBAN und Referenz). Zeilen klappen die Zahlungsdetails auf. Sponsum überträgt das Asset erst nach der Provider-Meldung — nicht über einen «bezahlt»-Klick.</p>
     ${errorLine()}
     <section class="card">
       <table>
@@ -1603,9 +1699,17 @@ function renderSettlement() {
               ? workspace.settlements
                   .map((row) => {
                     const pending = row.status === "ISSUED" || row.status === "SEEN";
-                    const href = settlementHref(row);
-                    return `<tr class="clickable" data-href="${href}">
-                <td class="mono"><a href="${href}">${(row.trade_id || row.trade?.trade_id || row.instruction_id || "–").slice(0, 18)}</a></td>
+                    const key = settlementKey(row);
+                    const safeId = esc(key);
+                    const opened = expandId && (expandId === key || expandId === row.instruction_id);
+                    return `<tr class="settle-row clickable${opened ? " is-open" : ""}" data-settle="${safeId}">
+                <td>
+                  <button type="button" class="settle-toggle" aria-expanded="${opened ? "true" : "false"}" aria-controls="settle-panel-${safeId}">
+                    <span class="chevron" aria-hidden="true"></span>
+                    <span class="visually-hidden">Abschluss aufklappen</span>
+                  </button>
+                  <span class="mono settle-id">${esc((key || "–").slice(0, 18))}</span>
+                </td>
                 <td>${row.trade ? badge(row.trade.status) : "–"}</td>
                 <td class="num">${formatChf(row.amount, row.currency)}</td>
                 <td class="mono">${formatIban(row.payee_iban)}</td>
@@ -1616,6 +1720,9 @@ function renderSettlement() {
                     ? `<button type="button" data-confirm="${row.instruction_id}">Zahlungseingang übernehmen</button>`
                     : "—"
                 }</td>
+              </tr>
+              <tr class="settle-detail" id="settle-panel-${safeId}" ${opened ? "" : "hidden"}>
+                <td colspan="7"><div class="settle-panel" data-settle-panel="${safeId}"></div></td>
               </tr>`;
                   })
                   .join("")
@@ -1627,14 +1734,26 @@ function renderSettlement() {
         workspace.settlements.length === 0
           ? `<p class="muted">Zuerst ein Gebot annehmen oder eine Zession abschliessen.</p>`
           : open.length === 0
-            ? `<p class="muted">Keine offene Zahlung. Abgeschlossene Anweisungen stehen in der Tabelle.</p>`
+            ? `<p class="muted">Keine offene Zahlung. Zeile aufklappen für IBAN, Referenz und Protokoll.</p>`
             : ""
       }
     </section>
   `;
-  bindClickableRows();
+  main.querySelectorAll("tr.settle-row").forEach((row) => {
+    const toggle = () => toggleSettlementRow(row);
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("a, button[data-confirm], input, select, label")) return;
+      toggle();
+    });
+    row.querySelector(".settle-toggle")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggle();
+    });
+    if (row.classList.contains("is-open")) toggleSettlementRow(row, true);
+  });
   main.querySelectorAll("[data-confirm]").forEach((button) => {
-    button.addEventListener("click", () =>
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
       act(
         () =>
         api(`/settlements/${button.getAttribute("data-confirm")}/provider-confirm`, {
@@ -1642,8 +1761,8 @@ function renderSettlement() {
           body: JSON.stringify({ provider: "external-psp" })
         }),
         "Zahlungseingang übernehmen und das Asset übertragen? Dieser Schritt ist nicht umkehrbar."
-      )
-    );
+      );
+    });
   });
 }
 

@@ -18,7 +18,7 @@ and not the previous page.
 | Wechsel | `#/wechsel` | `#/wechsel/:instrument_id` | `/api/sponsum/v1/wechsel-drafts/:id/dossier` |
 | Marktangebot | `#/market` | `#/market/:offer_id` | `/api/sponsum/v1/offers/:id` |
 | Dispute / Resolve | `#/disputes` | `#/disputes/:dispute_id` | `/api/sponsum/v1/disputes/:id` |
-| Abschluss / Abrechnung | `#/settlement` | `#/settlement/:trade_or_instruction_id` | `/api/sponsum/v1/settlements/:id` |
+| Abschluss / Abrechnung | `#/settlement` (Zeilen klappen auf) | `#/settlement/:trade_or_instruction_id` öffnet dieselbe Liste mit aufgeklappter Zeile | `/api/sponsum/v1/settlements/:id` |
 | Zession | `#/zession` | `#/zession/:assignment_id` | `/api/sponsum/v1/assignments/:id` |
 | Kapitalbedarf | `#/capital` | `#/capital/need/:need_id` | `/api/sponsum/v1/capital/needs/:id` |
 | Kapital-Provider | `#/capital` | `#/capital/provider/:provider_id` | `/api/sponsum/v1/capital/providers/:id` |

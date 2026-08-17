@@ -116,6 +116,27 @@ th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line
 th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.clickable { cursor: pointer; }
 tr.clickable:hover td { background: var(--soft); }
+.settle-toggle {
+  background: transparent;
+  color: var(--ink);
+  padding: 2px 8px 2px 4px;
+  margin-right: 4px;
+  font-weight: 700;
+  line-height: 1;
+}
+.settle-toggle .chevron::before { content: "▸"; display: inline-block; width: 1em; }
+tr.settle-row.is-open .settle-toggle .chevron::before { content: "▾"; }
+tr.settle-row.is-open td { background: var(--soft); }
+tr.settle-detail td {
+  background: var(--soft);
+  padding: 12px 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+tr.settle-detail[hidden] { display: none; }
+.settle-panel .actions { margin-top: 8px; }
+.settle-id { word-break: break-all; }
+.settle-events { margin-top: 12px; }
+.settle-events summary { cursor: pointer; font-weight: 600; }
 .kv { display: grid; grid-template-columns: 150px 1fr; gap: 6px 12px; margin: 0; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; }
