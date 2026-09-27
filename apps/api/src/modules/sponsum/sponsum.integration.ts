@@ -1,4 +1,5 @@
 import "./sponsum-test-env.js";
+import { authorizedFetch as fetch } from "./access-test-env.js";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
@@ -75,6 +76,10 @@ test("HTTP create-receivable then get-receivable on shipped createApp", async ()
       body: "{}"
     });
     assert.equal(endorse.status, 403);
+    const signed = await fetch(`${base}/api/sponsum/v1/wechsel-drafts/${paper.draft.instrument_id}/sign`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: "DRAWER", quality: "SES" })
+    });
+    assert.equal(signed.status, 200);
     const accepted = await fetch(`${base}/api/sponsum/v1/wechsel-drafts/${paper.draft.instrument_id}/accept`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

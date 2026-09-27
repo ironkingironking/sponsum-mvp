@@ -1,0 +1,29 @@
+--- a/apps/api/src/modules/sponsum/service.ts
++++ b/apps/api/src/modules/sponsum/service.ts
+@@ -1006,5 +1015,5 @@
+     const state = this.store.snapshot();
+     const workbench = this.ensureAutoLinks(state, pack.asset);
+-    this.store.replace(state);
++    if (!principal()) this.store.replace(state);
+     const fulfilment = this.lookupFulfilment(pack.asset, workbench);
+     if (fulfilment) {
+@@ -1012,5 +1021,5 @@
+         { doctype: "Fulfilment Case", name: fulfilment.id, label: `Fulfillment Box ${fulfilment.id}` }
+       ]);
+-      this.store.replace(state);
++      if (!principal()) this.store.replace(state);
+     }
+     return {
+@@ -1321,4 +1330,5 @@
+
+   private lookupFulfilment(asset: ReceivableAsset, workbench: DisputeWorkbenchRecord, customerName?: string) {
++    if (principal()) return null;
+     const so = workbench.links.find((row) => /sales order|auftrag/i.test(row.doctype + row.label));
+     return lookupFulfilmentBox({
+@@ -2692,5 +2704,5 @@
+
+ function partyCardsForVenue(state: ReturnType<MemorySponsumStore["snapshot"]>): PartyCard[] {
+-  if (partyCardCache && Date.now() - partyCardCache.at < 120_000) {
++  if (!principal() && partyCardCache && Date.now() - partyCardCache.at < 120_000) {
+     return partyCardCache.cards;
+   }

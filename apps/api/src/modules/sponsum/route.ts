@@ -1,8 +1,14 @@
+import { requireSponsumScope, principal } from "./access-context.js";
 import { Router } from "express";
 import { DomainError } from "@sponsum/shared";
 import { sponsumService } from "./service.js";
 
 export const sponsumRouter = Router();
+sponsumRouter.use(requireSponsumScope());
+sponsumRouter.get("/session", (_req, res) => res.json({ ...principal(), policy: "owner_or_shared_with_tenant_admin" }));
+sponsumRouter.post("/access/:kind/:id", (req, res) => {
+  handle(() => sponsumService.shareReadAccess(req.params.kind, req.params.id, req.body?.readers), res);
+});
 
 function handle(run: () => unknown, res: import("express").Response): void {
   try {

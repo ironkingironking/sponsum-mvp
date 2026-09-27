@@ -1,3 +1,5 @@
+import { principal } from "./access-context.js";
+import { secureStore, setRecordReaders } from "./scoped-store.js";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import http from "node:http";
@@ -94,9 +96,16 @@ export type SettlementWebhookInput = {
 const EVENT_SECRET = "sponsum-node-event-secret";
 
 export class SponsumService {
-  constructor(private readonly store = new MemorySponsumStore()) {}
+  constructor(private readonly store = new MemorySponsumStore()) { this.store = secureStore(store); }
+
+  shareReadAccess(kind: string, id: string, readers: unknown) { return setRecordReaders(this.store, kind, id, readers); }
 
   createReceivable(input: CreateReceivableInput): ReceivableAsset {
+    const who = principal();
+    if (who) {
+      if (input.origin_tenant_id && input.origin_tenant_id !== who.tenantId) throw new DomainError("forbidden", "Fremder Mandant.");
+      input = { ...input, origin_tenant_id: who.tenantId };
+    }
     assertNoSponsumFunds(false);
     assertNoFractionalTokens(false);
     const jurisdiction = input.jurisdiction ?? "CH";
@@ -870,7 +879,7 @@ export class SponsumService {
   }
 
   workspace() {
-    this.seedDemoIfEmpty();
+    if (!principal()) this.seedDemoIfEmpty();
     const state = this.store.snapshot();
     const live = this.discoveryLevel0();
     return {
@@ -1494,6 +1503,7 @@ export class SponsumService {
   }
 
   async listParties() {
+    if (principal()) return { ...localPartiesFromState(this.store.snapshot()), source: "local" };
     const fromErp = await fetchErpNextParties();
     const local = localPartiesFromState(this.store.snapshot());
     const merged = mergeParties(fromErp, local);
@@ -1937,6 +1947,7 @@ export class SponsumService {
     partyId: string,
     status: PartyKyc["status"]
   ): void {
+    if (principal() && !principal()!.admin) return;
     const existing = state.kyc.find((item) => item.party_id === partyId);
     if (existing) existing.status = status;
     else state.kyc.push({ party_id: partyId, status });
@@ -1971,7 +1982,7 @@ export class SponsumService {
 }
 
 const storePath = process.env.SPONSUM_STORE_PATH;
-export const sponsumService = new SponsumService(storePath ? new FileSponsumStore(storePath) : new MemorySponsumStore());
+export const sponsumService = new SponsumService(secureStore(storePath ? new FileSponsumStore(storePath) : new MemorySponsumStore(), true));
 
 type PartyRow = {
   id: string;
