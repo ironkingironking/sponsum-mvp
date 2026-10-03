@@ -4,7 +4,7 @@
  * docstatus, the Loan Application -> Loan mapping that carries same-named fields (get_mapped_doc), and a repayment
  * schedule owned by Lending. It never computes anything Sponsum would show as its own.
  */
-import type { LendingDoc, LendingFilter, LendingTransport } from "./lending-bridge.js";
+import { LendingError, type LendingDoc, type LendingFilter, type LendingTransport } from "./lending-bridge.js";
 
 export type LendingMock = LendingTransport & {
   docs: Map<string, LendingDoc[]>;
@@ -58,6 +58,10 @@ export function createLendingMock(): LendingMock {
     },
     async insert(doctype, doc) {
       calls.push({ op: "insert", doctype });
+      if (doctype === "Loan Application" && typeof doc.loan_amount !== "number") {
+        // Like Lending: validate() compares loan_amount with numbers before Frappe casts types -> TypeError, HTTP 500.
+        throw new LendingError("lending_unreachable", "Frappe Lending antwortet mit Fehler 500.");
+      }
       const prefix = doctype === "Loan Application" ? "ACC-LOAP-2026" : doctype === "Loan" ? "ACC-LOAN-2026" : doctype;
       const stored: LendingDoc = { ...doc, name: nextName(prefix), docstatus: 0, status: doctype === "Loan Application" ? "Open" : "Draft" };
       if (doctype === "Loan Application" && Array.isArray(doc.proposed_pledges)) {

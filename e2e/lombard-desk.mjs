@@ -97,19 +97,31 @@ try {
   check("nav entry 'Lombard'", (await page.locator('nav a[data-nav="lombard"]').count()) === 1);
   check("securities with Lending price", (await page.locator("text=Bitcoin").count()) > 0);
   check("security without price marked", (await page.locator("text=kein Kurs").count()) === 1);
-  check("only priced securities selectable", (await page.locator('select[name="sec0"] option[value="XAU"]').count()) === 0);
+  const row = (i) => page.locator(".lombard-row").nth(i);
+  check("one collateral row by default", (await page.locator(".lombard-row").count()) === 1);
+  check("only priced securities selectable", (await row(0).locator('option[value="XAU"]').count()) === 0);
+  check("the only priced security is preselected", (await row(0).locator('[data-field="sec"]').inputValue()) === "BTC");
 
   await page.selectOption('select[name="customer_id"]', "customer:Nordholz AG");
   await page.fill('input[name="amount"]', "35000");
-  await page.selectOption('select[name="sec0"]', "BTC");
-  await page.fill('input[name="qty0"]', "0.5");
+  await row(0).locator('[data-field="qty"]').fill("0.5");
   const digits = (text) => text.replace(/[^\d.]/g, "");
+  const rowValue = await row(0).locator('[data-field="value"]').textContent();
+  check("value shown in the row", rowValue.includes("Wert") && rowValue.replace(/[^\d.·]/g, "").includes("17537.29"), rowValue);
   let value = await page.locator("#lombard-value").textContent();
-  check("live value 0.5 BTC after 50 % haircut", digits(value).startsWith("17537.29"), value);
+  check("live total 0.5 BTC after 50 % haircut", digits(value).startsWith("17537.29"), value);
   check("amount above value flagged", (await page.locator("#lombard-value").getAttribute("class")) === "error");
-  await page.fill('input[name="qty0"]', "1");
+
+  await page.click("#lombard-add");
+  check("'+ Weitere Sicherheit' adds a row", (await page.locator(".lombard-row").count()) === 2);
+  await row(1).locator('[data-field="qty"]').fill("3");
+  check("quantity without security asks for one", ((await row(1).locator('[data-field="value"]').textContent()) || "").includes("Sicherheit wählen"));
+  await row(1).locator("[data-remove]").click();
+  check("row can be removed", (await page.locator(".lombard-row").count()) === 1);
+
+  await row(0).locator('[data-field="qty"]').fill("1");
   value = await page.locator("#lombard-value").textContent();
-  check("live value 1 BTC", digits(value).startsWith("35074.58") && !value.includes("zu hoch"), value);
+  check("live total 1 BTC", digits(value).startsWith("35074.58") && !value.includes("zu hoch"), value);
   await page.fill('input[name="custody_ref"]', need.custody_ref);
   await page.screenshot({ path: join(OUT, "lombard-page.png"), fullPage: true });
 

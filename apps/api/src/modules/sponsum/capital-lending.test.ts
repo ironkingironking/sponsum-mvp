@@ -140,7 +140,7 @@ test("loan request: not configured until O1/O8, then one draft application via L
   assert.equal(application.movena_sponsum_receivable_id, asset.receivable_id);
   assert.equal(application.movena_sponsum_capital_need_id, need.need_id);
   assert.equal(application.applicant, "Nordholz AG");
-  assert.equal(application.loan_amount, "20000.00");
+  assert.equal(application.loan_amount, 20000);
 
   const events = service.capitalNeedDossier(need.need_id).events.filter((event) => event.event_type === "LENDING_APPLICATION_REQUESTED");
   assert.equal(events.length, 1);

@@ -158,7 +158,7 @@ test("handover creates one draft Loan Application with Sponsum references only",
   assert.equal(application.applicant_type, "Customer");
   assert.equal(application.applicant, "Nordholz AG");
   assert.equal(application.loan_product, "Forderungsfinanzierung Test");
-  assert.equal(application.loan_amount, "8000.00");
+  assert.equal(application.loan_amount, 8000);
   assert.equal(application.movena_sponsum_receivable_id, "SPN-1");
   assert.equal(application.movena_sponsum_capital_need_id, "CAP-1");
   // No rate, accounts or schedule from Sponsum: those belong to the Loan Product in Lending.
@@ -217,7 +217,7 @@ test("status is read from Lending as it is: application, then loan with its next
   assert.equal(active?.source, "LENDING · Loan");
   assert.equal(active?.loan?.name, loanName);
   assert.equal(active?.loan?.status, "Disbursed");
-  assert.equal(active?.loan?.disbursed_amount, "8000.00");
+  assert.equal(active?.loan?.disbursed_amount, 8000);
   assert.deepEqual(active?.next_installment, { payment_date: "2026-10-31", total_payment: 2010.5 });
   assert.equal(active?.deep_link, `https://erp.example.invalid/desk/loan/${loanName}`);
 });
@@ -270,6 +270,22 @@ test("http transport: errors map to stable codes and never carry the credentials
       return true;
     });
   }
+
+  // A 500 names Frappe's exception class (diagnosis), never the traceback or exception text.
+  await assert.rejects(
+    respond(500, { exc_type: "TypeError", exception: "TypeError: '>' not supported\nTraceback (most recent call last) ..." }).insert("Loan Application", {}),
+    (error: unknown) => {
+      assert.ok(error instanceof LendingError);
+      assert.equal(error.message, "Frappe Lending antwortet mit Fehler 500 (TypeError).");
+      return true;
+    }
+  );
+});
+
+test("amounts go to Lending as numbers (Lending compares them before Frappe casts types)", async () => {
+  const { mock, deps } = setup();
+  await requestLoanApplication({ need: need(), receivable: receivable(), confirm: true }, deps);
+  assert.equal(typeof mock.docs.get("Loan Application")![0].loan_amount, "number");
 });
 
 test("customers of the lending company: active ones, as customer:<name> ids, sorted", async () => {

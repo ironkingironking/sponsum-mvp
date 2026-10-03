@@ -3010,9 +3010,18 @@ async function renderLombard() {
   const customers = workspace.lendingCustomers || [];
   const requests = (data.requests || []).slice().reverse();
   const canRequest = data.configured && customers.length && priced.length;
-  const securityOptions = priced
-    .map((row) => `<option value="${esc(row.code)}">${esc(row.name)} (${esc(row.type)}, ${formatChf(row.price)})</option>`)
-    .join("");
+  // One collateral row by default (the only priced security preselected), more via "+ Weitere Sicherheit".
+  const pledgeRow = (selected = "", removable = false) => `<div class="actions lombard-row">
+      <label>Sicherheit <select data-field="sec"><option value="">— wählen</option>${priced
+        .map(
+          (row) =>
+            `<option value="${esc(row.code)}" ${row.code === selected ? "selected" : ""}>${esc(row.name)} (${esc(row.type)}, ${formatChf(row.price)})</option>`
+        )
+        .join("")}</select></label>
+      <label>Menge <input data-field="qty" inputmode="decimal" placeholder="z. B. 0.5" /></label>
+      <span class="muted" data-field="value"></span>
+      ${removable ? `<button type="button" class="btn ghost" data-remove>entfernen</button>` : ""}
+    </div>`;
   main.innerHTML = `
     <h1>Lombardkredit</h1>
     <p class="lead">Kredit gegen verpfändete Werte. Frappe Lending führt Kredit, Sicherheiten, Kurse und Nachschuss; Sponsum erfasst den Antrag und zeigt den Stand. Verwahrung per Multisig-Treuhand — Sponsum hält keine Werte und keine Schlüssel.</p>
@@ -3049,17 +3058,11 @@ async function renderLombard() {
             ? `<form id="lombard-form" class="stack">
                 <label>Kunde <select name="customer_id" required><option value="">wählen…</option>${lendingCustomerOptgroup("")}</select></label>
                 <label>Kreditbetrag CHF <input name="amount" inputmode="decimal" required placeholder="0.00" /></label>
-                ${[0, 1, 2]
-                  .map(
-                    (i) => `<div class="actions">
-                      <label>Sicherheit <select name="sec${i}"><option value="">—</option>${securityOptions}</select></label>
-                      <label>Menge <input name="qty${i}" inputmode="decimal" placeholder="0" /></label>
-                    </div>`
-                  )
-                  .join("")}
+                <div id="lombard-pledges" class="stack">${pledgeRow(priced.length === 1 ? priced[0].code : "")}</div>
+                <div class="actions"><button type="button" class="btn ghost" id="lombard-add">+ Weitere Sicherheit</button></div>
                 <label>Verwahrung <input name="custody_ref" required placeholder="Multisig-Adresse, -Descriptor (xpub) oder Depot-Nr." /></label>
                 <p class="muted">Nur öffentliche Angaben — nie private Schlüssel oder Seed-Phrasen.</p>
-                <p id="lombard-value" class="muted">Belehnungswert nach Abschlag: ${formatChf(0)}</p>
+                <p id="lombard-value" class="muted">Belehnungswert nach Abschlag (total): ${formatChf(0)}</p>
                 <button type="submit">Lombardkredit in Lending beantragen</button>
               </form>`
             : `<p class="muted">${
@@ -3099,23 +3102,52 @@ async function renderLombard() {
   const form = document.getElementById("lombard-form");
   if (!form) return;
   const byCode = new Map(priced.map((row) => [row.code, row]));
-  const pledgesOf = () =>
-    [0, 1, 2]
-      .map((i) => ({ loan_security: form.elements[`sec${i}`].value, qty: lombardQty(form.elements[`qty${i}`].value) }))
-      .filter((row) => row.loan_security && row.qty > 0);
+  const rows = () => [...form.querySelectorAll(".lombard-row")];
+  const rowPledge = (row) => ({
+    loan_security: row.querySelector('[data-field="sec"]').value,
+    qty: lombardQty(row.querySelector('[data-field="qty"]').value)
+  });
+  const pledgesOf = () => rows().map(rowPledge).filter((row) => row.loan_security && row.qty > 0);
   const valueOf = (pledges) =>
     pledges.reduce((sum, row) => {
       const security = byCode.get(row.loan_security);
       return security ? sum + row.qty * security.price * (1 - security.haircut / 100) : sum;
     }, 0);
   const update = () => {
+    for (const row of rows()) {
+      const { loan_security, qty } = rowPledge(row);
+      const security = byCode.get(loan_security);
+      const target = row.querySelector('[data-field="value"]');
+      if (qty > 0 && !security) {
+        target.textContent = "Sicherheit wählen";
+        target.className = "error";
+      } else if (qty > 0) {
+        target.textContent = `Wert ${formatChf(qty * security.price)} · belehnbar ${formatChf(qty * security.price * (1 - security.haircut / 100))}`;
+        target.className = "muted";
+      } else {
+        target.textContent = "";
+        target.className = "muted";
+      }
+    }
     const value = valueOf(pledgesOf());
     const amount = lombardQty(form.elements.amount.value);
     const target = document.getElementById("lombard-value");
-    target.textContent = `Belehnungswert nach Abschlag: ${formatChf(value)}${amount > value ? " — Betrag zu hoch" : ""}`;
+    target.textContent = `Belehnungswert nach Abschlag (total): ${formatChf(value)}${amount > value ? " — Betrag zu hoch" : ""}`;
     target.className = amount > value && amount > 0 ? "error" : "muted";
   };
   form.addEventListener("input", update);
+  form.addEventListener("change", update);
+  document.getElementById("lombard-add").addEventListener("click", () => {
+    if (rows().length >= 5) return;
+    document.getElementById("lombard-pledges").insertAdjacentHTML("beforeend", pledgeRow("", true));
+    update();
+  });
+  form.addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-remove]");
+    if (!remove) return;
+    remove.closest(".lombard-row").remove();
+    update();
+  });
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const pledges = pledgesOf();

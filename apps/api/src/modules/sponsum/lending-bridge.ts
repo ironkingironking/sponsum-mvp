@@ -133,7 +133,9 @@ export function createHttpLendingTransport(
       throw new LendingError("lending_forbidden", "Frappe Lending verweigert den Zugriff für den technischen Benutzer.");
     }
     if (response.status >= 500) {
-      throw new LendingError("lending_unreachable", `Frappe Lending antwortet mit Fehler ${response.status}.`);
+      // Frappe's exception class only (e.g. TypeError), never the traceback or request data.
+      const excType = typeof json?.exc_type === "string" && /^[A-Za-z][A-Za-z0-9_.]{0,80}$/.test(json.exc_type) ? ` (${json.exc_type})` : "";
+      throw new LendingError("lending_unreachable", `Frappe Lending antwortet mit Fehler ${response.status}${excType}.`);
     }
     return { status: response.status, json };
   }
@@ -222,6 +224,14 @@ function cents(value: string, label: string): bigint {
   }
   const [whole, fraction = ""] = trimmed.split(".");
   return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
+}
+
+/**
+ * Amounts go to Lending as numbers. Lending compares loan_amount with maximum_loan_amount in validate() before Frappe
+ * casts field types; a string ("20000.00") raised TypeError -> HTTP 500 on every secured application (2026-10-03).
+ */
+function lendingAmount(value: string): number {
+  return Number(cents(value, "Kreditbetrag")) / 100;
 }
 
 function customerFromParty(partyId: string): string | null {
@@ -345,7 +355,7 @@ export async function requestLoanApplication(
     applicant: customer,
     company: config.company,
     loan_product: config.loanProduct,
-    loan_amount: input.need.amount,
+    loan_amount: lendingAmount(input.need.amount),
     ...(deps.today ? { posting_date: deps.today } : {}),
     [SPONSUM_RECEIVABLE_FIELD]: input.receivable.receivable_id,
     [SPONSUM_CAPITAL_NEED_FIELD]: input.need.need_id
@@ -634,7 +644,7 @@ export async function requestLombardApplication(
     applicant: customer,
     company: config.company,
     loan_product: config.lombardProduct,
-    loan_amount: input.amount,
+    loan_amount: lendingAmount(input.amount),
     is_secured_loan: 1,
     proposed_pledges: pledges.map((pledge) => ({ loan_security: pledge.loan_security, qty: pledge.qty })),
     [SPONSUM_CAPITAL_NEED_FIELD]: input.requestId
