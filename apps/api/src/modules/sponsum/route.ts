@@ -21,11 +21,16 @@ function sendDomainError(error: unknown, res: import("express").Response): boole
         ? 403
         : error.code === "policy_denied" || error.code === "skribble_quality_downgraded"
           ? 403
-          : error.code === "skribble_not_configured" || error.code === "skribble_unreachable"
+          : error.code === "skribble_not_configured" ||
+              error.code === "skribble_unreachable" ||
+              error.code === "lending_not_configured" ||
+              error.code === "lending_unreachable"
             ? 503
-            : error.code === "validation_error"
-              ? 400
-              : 409;
+            : error.code === "lending_forbidden"
+              ? 502
+              : error.code === "validation_error" || error.code === "confirmation_required" || error.code === "invalid_amount"
+                ? 400
+                : 409;
   res.status(status).json({ error: { code: error.code, message: error.message } });
   return true;
 }
@@ -385,6 +390,26 @@ sponsumRouter.post("/capital/needs/:id/interest", (req, res) => {
 
 sponsumRouter.post("/capital/needs/:id/withdraw", (req, res) => {
   handle(() => sponsumService.withdrawCapitalNeed(req.params.id), res);
+});
+
+// Frappe Lending (movena-suite docs/architecture/frappe-lending.md, docs/lending.md)
+sponsumRouter.post("/capital/needs/:id/confirm", (req, res) => {
+  handle(
+    () =>
+      sponsumService.confirmCapitalNeed(req.params.id, {
+        receivable_id: req.body?.receivable_id,
+        confirm: req.body?.confirm === true
+      }),
+    res
+  );
+});
+
+sponsumRouter.post("/capital/needs/:id/lending", (req, res) => {
+  handle(() => sponsumService.requestCapitalNeedLoan(req.params.id, { confirm: req.body?.confirm === true }), res);
+});
+
+sponsumRouter.get("/receivables/:id/lending", (req, res) => {
+  handle(() => sponsumService.receivableLending(req.params.id), res);
 });
 
 sponsumRouter.get("/discovery", (_req, res) => {

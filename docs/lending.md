@@ -1,6 +1,6 @@
 # Sponsum ↔ Frappe Lending
 
-**Stand:** 2026-10-03. Welle 3 mock-first: Brücke und Mock mit Tests, noch nicht in Kapitalbedarf, Route oder Desk verdrahtet.
+**Stand:** 2026-10-03. Verdrahtet: Bestätigung, Kreditantrag und Status in Kapitalbedarf, Route und Desk. Live antwortet Lending mit `lending_not_configured`, bis Kreditprodukt (O1) und technischer Benutzer (O8) stehen.
 **Entscheidung:** movena-suite `docs/architecture/frappe-lending.md`, Runbook `docs/runbooks/frappe-lending.md`
 
 ## Schnitt
@@ -23,6 +23,10 @@
 | `apps/api/src/modules/sponsum/lending-bridge.ts` | `lendingConfigFromEnv`, `createHttpLendingTransport` (Frappe REST), `assertLendable`, `requestLoanApplication`, `readLendingStatus` |
 | `apps/api/src/modules/sponsum/lending-mock.ts` | In-Memory-Lending für Tests und lokale Entwicklung, inklusive Mapping Antrag → Loan und Tilgungsplan |
 | `apps/api/src/modules/sponsum/lending-bridge.test.ts` | 10 Tests, ohne Netzwerk |
+| `apps/api/src/modules/sponsum/service.ts` | `confirmCapitalNeed`, `requestCapitalNeedLoan`, `receivableLending`; `LendingError` wird zu `DomainError` mit gleichem Code; `setLendingDeps` für Tests |
+| `apps/api/src/modules/sponsum/route.ts` | `POST /capital/needs/:id/confirm`, `POST /capital/needs/:id/lending`, `GET /receivables/:id/lending`; `lending_not_configured`/`lending_unreachable` → 503, `lending_forbidden` → 502, `confirmation_required`/`invalid_amount` → 400 |
+| `apps/api/public/sponsum/sponsum-desk.js` | Karte „Frappe Lending“ im Dossier des Kapitalbedarfs: Bestätigen (Auswahl der eigenen Forderungen), „Kredit in Lending anlegen“, Status mit Quelle und Deep-Link |
+| `apps/api/src/modules/sponsum/capital-lending.test.ts`, `capital-lending.integration.ts` | Service- und HTTP-Tests der Verdrahtung |
 
 Die Module sind bewusst eigenständig: Sie importieren weder `store.ts` noch `@sponsum/shared` und lassen sich so getrennt von der uncommitteten Desk-Arbeit committen.
 
@@ -88,13 +92,15 @@ Stabil, Meldungen auf Deutsch.
 | Kreditnehmer | `borrower_not_customer`, `customer_not_found` |
 | Beträge | `currency_mismatch`, `invalid_amount`, `loan_amount_exceeds_receivable` |
 
-## Noch offen (Verdrahtung)
+## Verdrahtung (2026-10-03)
 
-Die Verdrahtung ändert `store.ts`, `service.ts`, `route.ts` und den Desk. Diese Dateien tragen heute uncommittete Arbeit, die auch live läuft. Deshalb erst, wenn diese Arbeit committet ist (O9).
+1. `CapitalNeed.status` kennt `CONFIRMED`; `receivable_id: string | null`, `confirmed_by`, `confirmed_at`. Ereignisse `CAPITAL_NEED_CONFIRMED` und `LENDING_APPLICATION_REQUESTED`.
+2. **Bestätigen (O5):** nur die Mandantenadministration (`adminGroups`), nur mit `confirm: true`, nur mit einer eigenen Forderung des Suchenden, die die Lending-Regeln erfüllt. Idempotent für dieselbe Forderung; `already_confirmed` bei einer anderen.
+3. **Kredit anlegen:** ebenfalls nur die Mandantenadministration; ruft `requestLoanApplication`.
+4. **Sicherheit (O7):** nur als Referenz. Der Loan trägt die Sponsum-ID; die Zession bleibt in Sponsum. Lending hat keine Sicherheiten- oder Abschlagslogik.
+5. **Eigene Forderungen der Firma (O11):** laufen über Capital Interests mit externen Anbietern, nicht über Lending (`borrower_not_customer`).
+6. **Rückzahlung (O2):** Sponsum zeigt den Lending-Status nur an und verweist darauf; es gibt keinen zweiten Abschluss und keinen Statusabgleich.
 
-1. `CapitalNeed.status` um `CONFIRMED` erweitern, `receivable_id: string | null`, Aktion „bestätigen“ mit `confirm: true`. Offen: wer bestätigen darf.
-2. Route `POST /capital/needs/:id/lending` → `requestLoanApplication`; `GET /receivables/:id/lending` → `readLendingStatus`. `LendingError` auf `DomainError` mappen (gleiche Codes).
-3. Desk: Button „Kredit in Lending anlegen“ beim bestätigten Kapitalbedarf; Statuskarte mit Quelle und Deep-Link.
-4. Live erst mit technischem Benutzer (O8) und Loan Product (O1). Bis dahin antwortet die Route mit `lending_not_configured`.
+Noch offen für den Live-Betrieb: Kreditprodukt und Konten (O1), technischer Benutzer mit `Loan LOS User` + `Loan Reporter` + Lesezugriff auf Customer sowie die `MOVENA_LENDING_*`-Variablen in der `.env` des Dienstes (O8). Beides richtet ein Mensch ein.
 
 Test: `node --import tsx --test apps/api/src/modules/sponsum/lending-bridge.test.ts`, oder `npm test`.

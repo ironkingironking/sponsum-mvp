@@ -55,6 +55,15 @@ import {
   type WechselDraft
 } from "./store.js";
 import { lookupFulfilmentBox } from "./fulfilment-bridge.js";
+import {
+  assertLendable,
+  createHttpLendingTransport,
+  LendingError,
+  lendingConfigFromEnv,
+  readLendingStatus,
+  requestLoanApplication,
+  type LendingDeps
+} from "./lending-bridge.js";
 import { assessJurisdiction } from "./jurisdiction-deadlines.js";
 import { buildSimplePdf } from "./pdf.js";
 import { buildZip } from "./zip.js";
@@ -131,6 +140,13 @@ const EVENT_SECRET = "sponsum-node-event-secret";
 
 export class SponsumService {
   constructor(private readonly store = new MemorySponsumStore()) { this.store = secureStore(store); }
+
+  /** Frappe Lending access, read from the environment per call; tests inject the in-memory mock. */
+  private lendingDeps: () => LendingDeps = defaultLendingDeps;
+
+  setLendingDeps(factory: () => LendingDeps): void {
+    this.lendingDeps = factory;
+  }
 
   shareReadAccess(kind: string, id: string, readers: unknown) { return setRecordReaders(this.store, kind, id, readers); }
 
@@ -2241,6 +2257,98 @@ export class SponsumService {
     return need;
   }
 
+  /**
+   * O5: a tenant admin confirms a debt need and links it to exactly one receivable of the seeker. Only receivables
+   * the Lending handover would accept can be linked (same checks as lending-bridge.assertLendable, minus the
+   * ERPNext customer lookup). Idempotent for the same receivable.
+   */
+  confirmCapitalNeed(needId: string, input: { receivable_id?: string; confirm?: boolean } = {}): CapitalNeed {
+    const who = principal();
+    if (who && !who.admin) {
+      throw new DomainError("forbidden", "Nur die Mandantenadministration kann einen Kapitalbedarf bestätigen.");
+    }
+    if (input.confirm !== true) {
+      throw new DomainError("validation_error", "Bestätigung des Kapitalbedarfs braucht eine explizite Bestätigung.");
+    }
+    const state = this.store.snapshot();
+    const need = state.capital_needs.find((row) => row.need_id === needId);
+    if (!need) throw new DomainError("not_found", "Kapitalsuche nicht gefunden");
+    if (need.status === "WITHDRAWN") throw new DomainError("withdrawn", "Diese Suche ist zurückgezogen.");
+    const receivableId = String(input.receivable_id ?? "").trim();
+    if (need.status === "CONFIRMED") {
+      if (need.receivable_id === receivableId) return need;
+      throw new DomainError("already_confirmed", "Der Kapitalbedarf ist bereits mit einer anderen Forderung bestätigt.");
+    }
+    const asset = state.assets.find((row) => row.receivable_id === receivableId);
+    if (!asset) throw new DomainError("not_found", "Forderung nicht gefunden");
+    try {
+      assertLendable({ ...need, status: "CONFIRMED", receivable_id: asset.receivable_id }, asset);
+    } catch (error) {
+      throw lendingToDomain(error);
+    }
+    need.status = "CONFIRMED";
+    need.receivable_id = asset.receivable_id;
+    need.confirmed_by = who?.email ?? "system";
+    need.confirmed_at = new Date().toISOString();
+    this.appendEvent(state, {
+      type: "CAPITAL_NEED_CONFIRMED",
+      actor: who?.userId ?? need.seeker_party_id,
+      receivable_id: asset.receivable_id,
+      payload: { need_id: need.need_id, receivable_id: asset.receivable_id, invoice_id: asset.invoice_id }
+    });
+    this.store.replace(state);
+    return need;
+  }
+
+  /**
+   * "Kredit in Lending anlegen": one draft Loan Application in Frappe Lending per receivable (idempotent). Lending
+   * runs the contract; Sponsum keeps only the event. Tenant admins only, like the confirmation.
+   */
+  async requestCapitalNeedLoan(needId: string, input: { confirm?: boolean } = {}) {
+    const who = principal();
+    if (who && !who.admin) {
+      throw new DomainError("forbidden", "Nur die Mandantenadministration kann einen Kreditantrag auslösen.");
+    }
+    const before = this.store.snapshot();
+    const need = before.capital_needs.find((row) => row.need_id === needId);
+    if (!need) throw new DomainError("not_found", "Kapitalsuche nicht gefunden");
+    const asset = need.receivable_id ? before.assets.find((row) => row.receivable_id === need.receivable_id) : undefined;
+    if (!asset) {
+      throw new DomainError("capital_need_receivable_mismatch", "Der Kapitalbedarf ist mit keiner Forderung verknüpft.");
+    }
+    let result;
+    try {
+      result = await requestLoanApplication({ need, receivable: asset, confirm: input.confirm }, this.lendingDeps());
+    } catch (error) {
+      throw lendingToDomain(error);
+    }
+    if (result.created) {
+      // Fresh snapshot after the network call, so concurrent changes are not overwritten.
+      const state = this.store.snapshot();
+      this.appendEvent(state, {
+        type: "LENDING_APPLICATION_REQUESTED",
+        actor: who?.userId ?? need.seeker_party_id,
+        receivable_id: asset.receivable_id,
+        payload: { need_id: need.need_id, receivable_id: asset.receivable_id, loan_application: result.loan_application }
+      });
+      this.store.replace(state);
+    }
+    return result;
+  }
+
+  /** Read-only Lending status of a receivable, live from Frappe Lending; `configured: false` until O1/O8 are done. */
+  async receivableLending(id: string) {
+    const asset = this.getReceivable(decodeURIComponent(id));
+    try {
+      return { configured: true, lending: await readLendingStatus(asset.receivable_id, this.lendingDeps()) };
+    } catch (error) {
+      if (error instanceof LendingError && error.code === "lending_not_configured") {
+        return { configured: false, lending: null, message: error.message };
+      }
+      throw lendingToDomain(error);
+    }
+  }
+
   upsertBuyerProfile(profile: BuyerProfile): BuyerProfile {
     const state = this.store.snapshot();
     const existing = state.buyer_profiles.find((row) => row.party_id === profile.party_id);
@@ -2427,11 +2535,31 @@ export class SponsumService {
     const need = this.listCapitalNeeds().find((row) => row.need_id === key);
     if (!need) throw new DomainError("not_found", "Kapitalsuche nicht gefunden");
     const state = this.store.snapshot();
+    const who = principal();
     return {
       need,
       matches: this.matchCapitalProviders(need),
       interests: state.capital_interests.filter((row) => row.need_id === need.need_id),
-      events: state.events.filter((event) => String(event.payload?.need_id ?? "") === need.need_id)
+      events: state.events.filter((event) => String(event.payload?.need_id ?? "") === need.need_id),
+      // Frappe Lending (O5): who may confirm, and the seeker's receivables it could be linked to.
+      can_confirm: !who || who.admin,
+      receivable: need.receivable_id ? state.assets.find((row) => row.receivable_id === need.receivable_id) ?? null : null,
+      lending_candidates:
+        need.kind === "EQUITY" || need.status === "CONFIRMED" || need.status === "WITHDRAWN"
+          ? []
+          : state.assets
+              .filter(
+                (row) =>
+                  row.creditor_party_id === need.seeker_party_id && row.current_holder_party_id === row.creditor_party_id
+              )
+              .map((row) => ({
+                receivable_id: row.receivable_id,
+                invoice_id: row.invoice_id,
+                status: row.status,
+                instrument_type: row.instrument_type,
+                currency: row.currency,
+                outstanding_amount: row.outstanding_amount
+              }))
     };
   }
 
@@ -2584,6 +2712,16 @@ export class SponsumService {
     state.events.push(event);
     return event;
   }
+}
+
+function defaultLendingDeps(): LendingDeps {
+  const config = lendingConfigFromEnv();
+  return { config, transport: config ? createHttpLendingTransport(config) : null };
+}
+
+/** LendingError -> DomainError with the same stable code, so route.ts maps it like every other domain error. */
+function lendingToDomain(error: unknown): unknown {
+  return error instanceof LendingError ? new DomainError(error.code, error.message) : error;
 }
 
 const storePath = process.env.SPONSUM_STORE_PATH;

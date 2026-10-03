@@ -29,8 +29,11 @@ export type CapitalNeed = {
   purpose: string;
   sector: string;
   country: string;
-  status: "OPEN" | "INTRODUCED" | "WITHDRAWN";
-  receivable_id: null;
+  /** CONFIRMED: a tenant admin linked the need to exactly one receivable; releases the Lending handover (O5). */
+  status: "OPEN" | "INTRODUCED" | "CONFIRMED" | "WITHDRAWN";
+  receivable_id: string | null;
+  confirmed_by?: string | null;
+  confirmed_at?: string | null;
   legal_note: string;
   created_at: string;
 };

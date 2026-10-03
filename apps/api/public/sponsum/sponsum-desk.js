@@ -2800,6 +2800,7 @@ async function renderCapitalNeedDossier(id) {
       <p>${esc(need.legal_note)}</p>
       <p>Branche ${esc(need.sector)} · ${esc(need.country)} · ${need.need_id}</p>
     </section>
+    ${lendingCard(need, pack)}
     <section class="card">
       <h2>Passende Parteien</h2>
       ${(pack.matches || []).length
@@ -2841,6 +2842,114 @@ async function renderCapitalNeedDossier(id) {
       )
     );
   });
+  bindLendingCard(need);
+}
+
+// Frappe Lending: Lending on erp.movena.ch runs the loan contract (rate, schedule, bookings). Sponsum confirms the
+// need, triggers one draft application and shows Lending's status as it is (docs/lending.md).
+function lendingCard(need, pack) {
+  const note = `<p class="muted">Frappe Lending führt den Kreditvertrag: Zins, Tilgungsplan und Buchung. Sponsum zeigt nur Status und Verweis.</p>`;
+  if (need.kind === "EQUITY") {
+    return `<section class="card"><h2>Frappe Lending</h2><p class="muted">Eigenkapital läuft nicht über Frappe Lending.</p></section>`;
+  }
+  if (need.status === "WITHDRAWN") return "";
+  if (need.status !== "CONFIRMED") {
+    const candidates = pack.lending_candidates || [];
+    let body;
+    if (!pack.can_confirm) body = `<p class="muted">Bestätigung durch die Mandantenadministration ausstehend.</p>`;
+    else if (!candidates.length) body = `<p class="muted">Keine eigene Forderung des Suchenden zum Verknüpfen.</p>`;
+    else
+      body = `<form id="lending-confirm" class="stack">
+          <label>Forderung
+            <select name="receivable_id" required>
+              ${candidates
+                .map(
+                  (row) =>
+                    `<option value="${esc(row.receivable_id)}">${esc(row.invoice_id)} · ${formatChf(row.outstanding_amount, row.currency)} · ${labelOf(row.status)}</option>`
+                )
+                .join("")}
+            </select>
+          </label>
+          <button type="submit">Kapitalbedarf bestätigen</button>
+        </form>`;
+    return `<section class="card"><h2>Frappe Lending</h2>${note}${body}</section>`;
+  }
+  const receivable = pack.receivable;
+  return `<section class="card">
+      <h2>Frappe Lending</h2>
+      ${note}
+      <p>Bestätigt${need.confirmed_at ? ` am ${formatDate(need.confirmed_at)}` : ""} · Forderung
+        <a href="#/receivables/${esc(need.receivable_id)}">${esc(receivable ? receivable.invoice_id : need.receivable_id)}</a></p>
+      ${pack.can_confirm ? `<p><button type="button" id="lending-request">Kredit in Lending anlegen</button></p>` : ""}
+      <div id="lending-status" class="muted">Status aus Frappe Lending wird geladen …</div>
+    </section>`;
+}
+
+function lendingStatusHtml(data) {
+  if (!data.configured) {
+    return `<p class="muted">Frappe Lending ist noch nicht eingerichtet: Kreditprodukt und technischer Benutzer fehlen.</p>`;
+  }
+  const status = data.lending;
+  if (!status) return `<p class="muted">Noch kein Kreditantrag in Lending.</p>`;
+  const link = `<a href="${esc(status.deep_link)}" target="_blank" rel="noopener">In Lending öffnen</a>`;
+  if (status.stage === "APPLICATION") {
+    return `<p>Kreditantrag ${esc(status.application.name)} · ${esc(status.application.status)} · ${link}</p>
+      <p class="muted">Quelle ${esc(status.source)}</p>`;
+  }
+  const loan = status.loan;
+  const next = status.next_installment;
+  return `<table>
+      <tbody>
+        <tr><th>Kredit</th><td>${esc(loan.name)} · ${esc(loan.status)}</td></tr>
+        <tr><th>Kreditbetrag</th><td>${formatChf(loan.loan_amount)}</td></tr>
+        <tr><th>Ausbezahlt</th><td>${formatChf(loan.disbursed_amount)}</td></tr>
+        <tr><th>Bezahlt</th><td>${formatChf(loan.total_amount_paid)}</td></tr>
+        <tr><th>Nächste Rate</th><td>${next ? `${formatDate(next.payment_date)} · ${formatChf(next.total_payment)}` : "—"}</td></tr>
+      </tbody>
+    </table>
+    <p>${link} · <span class="muted">Quelle ${esc(status.source)}</span></p>`;
+}
+
+function bindLendingCard(need) {
+  const form = document.getElementById("lending-confirm");
+  if (form) {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const receivableId = new FormData(form).get("receivable_id");
+      act(
+        () =>
+          api(`/capital/needs/${encodeURIComponent(need.need_id)}/confirm`, {
+            method: "POST",
+            body: JSON.stringify({ receivable_id: receivableId, confirm: true })
+          }),
+        "Kapitalbedarf mit dieser Forderung bestätigen? Danach kann ein Kreditantrag in Frappe Lending ausgelöst werden."
+      );
+    });
+  }
+  const request = document.getElementById("lending-request");
+  if (request) {
+    request.addEventListener("click", () =>
+      act(
+        () =>
+          api(`/capital/needs/${encodeURIComponent(need.need_id)}/lending`, {
+            method: "POST",
+            body: JSON.stringify({ confirm: true })
+          }),
+        "Kreditantrag in Frappe Lending anlegen? Lending prüft, genehmigt, zahlt aus und bucht. Sponsum legt nur den Entwurf an."
+      )
+    );
+  }
+  const target = document.getElementById("lending-status");
+  if (target && need.receivable_id) {
+    api(`/receivables/${encodeURIComponent(need.receivable_id)}/lending`)
+      .then((data) => {
+        target.className = "";
+        target.innerHTML = lendingStatusHtml(data);
+      })
+      .catch((error) => {
+        target.textContent = `Status aus Frappe Lending nicht verfügbar: ${error.message}`;
+      });
+  }
 }
 
 async function renderCapitalProviderDossier(id) {
