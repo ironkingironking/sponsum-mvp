@@ -162,3 +162,28 @@ test("a need without a linked receivable cannot request a loan", async () => {
   withMock(service);
   await assert.rejects(service.requestCapitalNeedLoan(need.need_id, { confirm: true }), domainCode("capital_need_receivable_mismatch"));
 });
+
+test("ERPNext customers as seekers/creditors: lending tenant admins only, live from Lending", async () => {
+  const service = new SponsumService();
+  service.setLendingDeps(() => ({ config: null, transport: null }));
+  assert.equal((await service.lendingCustomers()).configured, false);
+
+  withMock(service);
+  const customers = await inScope(admin, () => service.lendingCustomers());
+  assert.deepEqual(customers.customers.map((row) => row.id), ["customer:Nordholz AG"]);
+  await assert.rejects(inScope(member, () => service.lendingCustomers()), domainCode("forbidden"));
+  const foreignAdmin: Principal = { ...admin, tenantId: "t2" };
+  assert.deepEqual((await inScope(foreignAdmin, () => service.lendingCustomers())).customers, []);
+});
+
+test("end to end with a customer as creditor and seeker: receivable, confirmation, draft application", async () => {
+  const service = new SponsumService();
+  const mock = withMock(service);
+  const [customer] = (await service.lendingCustomers()).customers;
+  const { asset, need } = seed(service, customer.id);
+  assert.equal(asset.creditor_party_id, "customer:Nordholz AG");
+  service.confirmCapitalNeed(need.need_id, { receivable_id: asset.receivable_id, confirm: true });
+  const result = await service.requestCapitalNeedLoan(need.need_id, { confirm: true });
+  assert.equal(result.created, true);
+  assert.equal(mock.docs.get("Loan Application")![0].applicant, "Nordholz AG");
+});

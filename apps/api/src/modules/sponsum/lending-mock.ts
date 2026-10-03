@@ -59,7 +59,7 @@ export function createLendingMock(): LendingMock {
       return structuredClone(stored);
     },
     addCustomer(name) {
-      table("Customer").push({ name, customer_name: name, docstatus: 0 });
+      table("Customer").push({ name, customer_name: name, docstatus: 0, disabled: 0 });
     },
     approveAndCreateLoan(applicationName, schedule = []) {
       const application = table("Loan Application").find((doc) => doc.name === applicationName);

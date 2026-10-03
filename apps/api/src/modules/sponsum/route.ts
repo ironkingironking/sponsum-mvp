@@ -408,6 +408,10 @@ sponsumRouter.post("/capital/needs/:id/lending", (req, res) => {
   handle(() => sponsumService.requestCapitalNeedLoan(req.params.id, { confirm: req.body?.confirm === true }), res);
 });
 
+sponsumRouter.get("/lending/customers", (_req, res) => {
+  handle(() => sponsumService.lendingCustomers(), res);
+});
+
 sponsumRouter.get("/receivables/:id/lending", (req, res) => {
   handle(() => sponsumService.receivableLending(req.params.id), res);
 });

@@ -5,6 +5,7 @@ import {
   createHttpLendingTransport,
   LendingError,
   lendingConfigFromEnv,
+  listLendingCustomers,
   readLendingStatus,
   requestLoanApplication,
   type LendableCapitalNeed,
@@ -265,4 +266,17 @@ test("http transport: errors map to stable codes and never carry the credentials
       return true;
     });
   }
+});
+
+test("customers of the lending company: active ones, as customer:<name> ids, sorted", async () => {
+  const { mock, deps } = setup();
+  mock.addCustomer("Zeta Bau AG");
+  mock.docs.get("Customer")!.push({ name: "Alt AG", customer_name: "Alt AG", disabled: 1 });
+  const customers = await listLendingCustomers(deps);
+  assert.deepEqual(
+    customers.map((row) => row.id),
+    ["customer:Nordholz AG", "customer:Zeta Bau AG"]
+  );
+  assert.equal(customers[0].name, "Nordholz AG");
+  await rejectsWith(listLendingCustomers({ config: null, transport: null }), "lending_not_configured");
 });

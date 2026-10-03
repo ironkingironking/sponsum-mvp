@@ -361,6 +361,24 @@ export type LendingStatus = {
   deep_link: string;
 };
 
+export type LendingCustomer = { id: string; name: string; erp_name: string; kind: "customer" };
+
+/**
+ * Active ERPNext customers of the lending company, live via the technical user (read-only on Customer). They are the
+ * possible borrowers (O6): Movena finances its customers' receivables. Nothing is stored in Sponsum.
+ */
+export async function listLendingCustomers(deps: LendingDeps, limit = 500): Promise<LendingCustomer[]> {
+  const { transport } = requireConfigured(deps);
+  const rows = await transport.list("Customer", [["disabled", "=", 0]], ["name", "customer_name"], limit);
+  return rows
+    .map((row) => {
+      const erpName = String(row.name ?? "");
+      return { id: `customer:${erpName}`, name: String(row.customer_name || erpName), erp_name: erpName, kind: "customer" as const };
+    })
+    .filter((row) => row.erp_name)
+    .sort((a, b) => a.name.localeCompare(b.name, "de-CH"));
+}
+
 /** Read-only status for the receivable, live from Lending. Null when Lending has nothing for it. */
 export async function readLendingStatus(receivableId: string, deps: LendingDeps): Promise<LendingStatus | null> {
   const { config, transport } = requireConfigured(deps);

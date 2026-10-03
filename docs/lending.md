@@ -101,6 +101,11 @@ Stabil, Meldungen auf Deutsch.
 5. **Eigene Forderungen der Firma (O11):** laufen über Capital Interests mit externen Anbietern, nicht über Lending (`borrower_not_customer`).
 6. **Rückzahlung (O2):** Sponsum zeigt den Lending-Status nur an und verweist darauf; es gibt keinen zweiten Abschluss und keinen Statusabgleich.
 
+7. **Kunden als Kreditnehmer (Option 1, 2026-10-03):** Movena finanziert die Forderungen seiner Kunden. `GET /lending/customers` liefert die aktiven ERPNext-Kunden der kreditgebenden Firma live über den technischen Benutzer (nur Lesen auf Customer), als `customer:<ERPNext-Name>`. Sponsum speichert davon nichts.
+   - Nur die Mandantenadministration des Lending-Mandanten sieht die Liste (`MOVENA_LENDING_TENANT`, Default der Legacy-Mandant). Andere Mandanten bekommen eine leere Liste.
+   - Im Desk erscheinen die Kunden beim Kapitalbedarf als „Mandant oder Kunde“ und bei „Neue Forderung“ im neuen Feld „Gläubiger“. Default bleibt die eigene Firma.
+   - Damit gilt für eine solche Forderung: Kunde = Gläubiger = Halter = Suchender. Genau das verlangt die Lending-Prüfung.
+
 Noch offen für den Live-Betrieb: Kreditprodukt und Konten (O1), technischer Benutzer mit `Loan LOS User` + `Loan Reporter` + Lesezugriff auf Customer sowie die `MOVENA_LENDING_*`-Variablen in der `.env` des Dienstes (O8). Beides richtet ein Mensch ein.
 
 Test: `node --import tsx --test apps/api/src/modules/sponsum/lending-bridge.test.ts`, oder `npm test`.

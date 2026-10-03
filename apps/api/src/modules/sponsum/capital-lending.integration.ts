@@ -70,6 +70,12 @@ test("HTTP: confirm a capital need as tenant admin, Lending answers not configur
     const statusBody = (await status.json()) as { configured: boolean; lending: unknown };
     assert.equal(statusBody.configured, false);
     assert.equal(statusBody.lending, null);
+
+    const customers = await fetch(`${api}/lending/customers`);
+    assert.equal(customers.status, 200);
+    const customersBody = (await customers.json()) as { configured: boolean; customers: unknown[] };
+    assert.equal(customersBody.configured, false);
+    assert.deepEqual(customersBody.customers, []);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

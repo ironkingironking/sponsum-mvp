@@ -7,7 +7,7 @@
  * Until the loan product exists (O1) it probes with a placeholder product name: only reads happen, nothing is created.
  * Prints results only, never credentials.
  */
-import { createHttpLendingTransport, lendingConfigFromEnv, readLendingStatus } from "../apps/api/src/modules/sponsum/lending-bridge.js";
+import { createHttpLendingTransport, lendingConfigFromEnv, listLendingCustomers, readLendingStatus } from "../apps/api/src/modules/sponsum/lending-bridge.js";
 
 const productSet = Boolean((process.env.MOVENA_LENDING_LOAN_PRODUCT ?? "").trim());
 const config = lendingConfigFromEnv({ ...process.env, MOVENA_LENDING_LOAN_PRODUCT: process.env.MOVENA_LENDING_LOAN_PRODUCT || "__probe__" });
@@ -31,6 +31,7 @@ async function main() {
   await check("loan product configured (O1)", async () => (productSet ? "yes" : "not yet: Sponsum answers lending_not_configured"));
   await check("status for an unknown receivable", async () => String(await readLendingStatus("SPN-PROBE-NONE", deps)));
   await check("customer lookup", async () => ((await transport.get("Customer", "__probe-does-not-exist__")) === null ? "404 -> null" : "unexpected hit"));
+  await check("ERPNext customers selectable as borrowers", async () => `${(await listLendingCustomers(deps)).length} active customer(s)`);
   await check("company exists", async () => {
     const rows = await transport.list("Loan Application", [["company", "=", config.company]], ["name"], 1);
     return `${config.company}, ${rows.length} application(s)`;

@@ -220,7 +220,22 @@ async function loadWorkspace() {
   } catch {
     workspace.parties = { companies: [], customers: [] };
   }
+  // Frappe Lending: the lending company's ERPNext customers (tenant admins of the lending tenant only). Movena can
+  // finance their receivables; they appear as seeker and creditor with the id `customer:<ERPNext name>`.
+  try {
+    workspace.lendingCustomers = (await api("/lending/customers")).customers || [];
+  } catch {
+    workspace.lendingCustomers = [];
+  }
   return workspace;
+}
+
+function lendingCustomerOptgroup(selected) {
+  const rows = workspace?.lendingCustomers || [];
+  if (!rows.length) return "";
+  return `<optgroup label="Kunde aus ERPNext (Movena finanziert)">${rows
+    .map((row) => `<option value="${esc(row.id)}" ${row.id === selected ? "selected" : ""}>${esc(row.name)}</option>`)
+    .join("")}</optgroup>`;
 }
 
 function esc(value) {
@@ -232,7 +247,7 @@ function esc(value) {
 
 function allParties() {
   const parties = workspace?.parties || {};
-  return [...(parties.companies || []), ...(parties.customers || [])];
+  return [...(parties.companies || []), ...(parties.customers || []), ...(workspace?.lendingCustomers || [])];
 }
 
 function partyLabel(id) {
@@ -860,6 +875,16 @@ function renderReceivables() {
         <form class="stack" id="create-form">
           <label>Rechnungsnummer <input name="invoice_id" required placeholder="z. B. RE-10482" value="${esc(invoicePrefill)}" /></label>
           <label>Nominal <input name="nominal_amount" inputmode="decimal" required placeholder="0.00" /></label>
+          ${
+            (workspace.lendingCustomers || []).length
+              ? `<label>Gläubiger
+                  <select name="creditor_party_id">
+                    <option value="${SELLER}">${esc(preferredCompany() || "Movena GmbH")} (eigene Forderung)</option>
+                    ${lendingCustomerOptgroup("")}
+                  </select>
+                </label>`
+              : ""
+          }
           <label>Schuldner <select name="debtor_party_id" required>${partyOptions("", { companies: false })}</select></label>
           ${stammdatenHint()}
           <button type="submit">Forderung anlegen</button>
@@ -884,7 +909,7 @@ function renderReceivables() {
           ...data,
           issue_date: new Date().toISOString().slice(0, 10),
           maturity_date: new Date(Date.now() + 67 * 86400000).toISOString().slice(0, 10),
-          creditor_party_id: SELLER,
+          creditor_party_id: data.creditor_party_id || SELLER,
           evidence: {
             hasInvoice: true,
             unpaid: true,
@@ -898,7 +923,9 @@ function renderReceivables() {
           }
         })
       }),
-      `Forderung ${data.invoice_id} für ${formatChf(data.nominal_amount)} anlegen?`
+      String(data.creditor_party_id || "").startsWith("customer:")
+        ? `Forderung ${data.invoice_id} über ${formatChf(data.nominal_amount)} für den Kunden ${partyLabel(data.creditor_party_id)} anlegen? Movena kann sie über Frappe Lending finanzieren.`
+        : `Forderung ${data.invoice_id} für ${formatChf(data.nominal_amount)} anlegen?`
     );
   });
 }
@@ -1723,6 +1750,7 @@ function renderCapital() {
   const needs = workspace.capital_needs || [];
   const interests = workspace.capital_interests || [];
   const drawerDefault = preferredCompany() || "seller-ui";
+  const financedCustomers = lendingCustomerOptgroup("");
   main.innerHTML = `
     <h1>Kapital suchen</h1>
     <p class="lead">Der Mandant sucht Investoren oder Gläubiger — <strong>losgelöst vom Wechsel</strong>. Sponsum vermittelt nur das Gespräch. Kein öffentliches Angebot, kein Fonds, keine Kundengelder.</p>
@@ -1731,7 +1759,8 @@ function renderCapital() {
       <section class="card">
         <h2>Bedarf erfassen</h2>
         <form class="stack" id="kap-form">
-          <label>Mandant <select name="seeker_party_id">${partyOptions(drawerDefault, { customers: false })}</select></label>
+          <label>${financedCustomers ? "Mandant oder Kunde" : "Mandant"} <select name="seeker_party_id">${partyOptions(drawerDefault, { customers: false })}${financedCustomers}</select></label>
+          ${financedCustomers ? `<p class="muted">Kunde aus ERPNext: Movena finanziert dessen Forderung über Frappe Lending (Fremdkapital).</p>` : ""}
           <label>Art
             <select name="kind" id="kap-kind">
               <option value="EQUITY">Eigenkapital / Beteiligung</option>

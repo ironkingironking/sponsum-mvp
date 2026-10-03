@@ -60,6 +60,7 @@ import {
   createHttpLendingTransport,
   LendingError,
   lendingConfigFromEnv,
+  listLendingCustomers,
   readLendingStatus,
   requestLoanApplication,
   type LendingDeps
@@ -2334,6 +2335,30 @@ export class SponsumService {
       this.store.replace(state);
     }
     return result;
+  }
+
+  /**
+   * Option 1 (2026-10-03): Movena finances its customers' receivables. Lists the lending company's ERPNext customers
+   * as possible seekers/creditors, live via the technical user. Tenant admins of the lending tenant only
+   * (MOVENA_LENDING_TENANT, default the legacy tenant): other tenants never see Movena's customer list.
+   */
+  async lendingCustomers() {
+    const who = principal();
+    if (who && !who.admin) {
+      throw new DomainError("forbidden", "Nur die Mandantenadministration sieht die Kunden aus ERPNext.");
+    }
+    const lendingTenant = (process.env.MOVENA_LENDING_TENANT || who?.legacyTenant || "").trim();
+    if (who && who.tenantId !== lendingTenant) {
+      return { configured: true, customers: [], message: "Frappe Lending ist für diesen Mandanten nicht freigeschaltet." };
+    }
+    try {
+      return { configured: true, customers: await listLendingCustomers(this.lendingDeps()) };
+    } catch (error) {
+      if (error instanceof LendingError && error.code === "lending_not_configured") {
+        return { configured: false, customers: [], message: error.message };
+      }
+      throw lendingToDomain(error);
+    }
   }
 
   /** Read-only Lending status of a receivable, live from Frappe Lending; `configured: false` until O1/O8 are done. */
