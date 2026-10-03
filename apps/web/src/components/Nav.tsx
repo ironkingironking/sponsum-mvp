@@ -8,6 +8,7 @@ import { AuthUser, clearStoredSession, getStoredSession, subscribeToAuthChanges 
 
 const topLinks = [
   ["/dashboard", "Dashboard"],
+  ["/sponsum", "Sponsum"],
   ["/marketplace", "Marketplace"],
   ["/claims/create", "Create Claim"],
   ["/deals", "My Deals"],
@@ -80,7 +81,12 @@ export function Nav() {
             {topLinks.map(([href, label]) => {
               const active = pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
               return (
-                <Link key={href} href={href} className={active ? "active" : ""}>
+                <Link
+                  key={href}
+                  href={href}
+                  className={active ? "active" : ""}
+                  data-testid={`nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
+                >
                   {label}
                 </Link>
               );

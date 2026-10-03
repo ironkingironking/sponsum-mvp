@@ -382,3 +382,71 @@ model EventLog {
   @@index([claimId])
   @@index([eventType])
 }
+
+/// First-class Sponsum receivable (economic claim). Invoice remains in origin ERP.
+model SponsumReceivable {
+  receivableId         String   @id
+  schemaVersion        String
+  origin               String
+  originTenantId       String
+  originInstanceId     String
+  parentReceivableId   String?
+  transferType         String
+  instrumentType       String   @default("ORDINARY_RECEIVABLE")
+  status               String
+  currency             String
+  nominalAmount        Decimal  @db.Decimal(18, 2)
+  acceptedAmount       Decimal  @db.Decimal(18, 2)
+  disputedAmount       Decimal  @db.Decimal(18, 2)
+  outstandingAmount    Decimal  @db.Decimal(18, 2)
+  issueDate            DateTime @db.Date
+  maturityDate         DateTime @db.Date
+  creditorPartyId      String
+  debtorPartyId        String
+  currentHolderPartyId String
+  invoiceId            String
+  contentHash          String
+  verificationScore    Int
+  riskClass            String
+  resolveCaseId        String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([originTenantId, invoiceId])
+  @@index([status])
+}
+
+model SponsumAssetLock {
+  receivableId String @id
+  state        String
+  offerId      String?
+  tradeId      String?
+  version      Int    @default(1)
+}
+
+model SponsumAssignmentRegistry {
+  id                 String  @id
+  receivableId       String
+  publicClaimHash    String  @unique
+  transferorPartyId  String
+  transfereePartyId  String?
+  status             String
+}
+
+model SponsumProtocolEvent {
+  eventId        String   @id
+  eventType      String
+  schemaVersion  String
+  receivableId   String?
+  offerId        String?
+  tradeId        String?
+  actorPartyId   String?
+  payload        Json
+  payloadHash    String
+  prevEventHash  String?
+  eventHash      String
+  signature      String?
+  createdAt      DateTime @default(now())
+
+  @@index([receivableId, createdAt])
+}

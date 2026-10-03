@@ -416,6 +416,8 @@ test("dispute, settlement and assignment dossiers are addressable", () => {
   const byCase = service.disputeDossier("resolve-case-alpha");
   assert.equal(byCase.dispute.receivable_id, asset.receivable_id);
   assert.equal(byCase.asset.invoice_id, asset.invoice_id);
+  assert.equal(byCase.workbench.ooc_stage, "resolve");
+  assert.ok(byCase.justitia.compose_url.includes(asset.receivable_id));
   assert.equal(service.disputeDossier(asset.receivable_id).dispute.dispute_id, "resolve-case-alpha");
   assert.throws(() => service.disputeDossier("missing-case"), (error: DomainError) => error.code === "not_found");
 

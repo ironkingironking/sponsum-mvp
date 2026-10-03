@@ -8,7 +8,8 @@ const sidebarLinks = [
   { href: "/deals?view=claims", label: "My Claims" },
   { href: "/deals?view=investments", label: "Investments" },
   { href: "/disputes", label: "Disputes" },
-  { href: "/profile", label: "Settings" }
+  { href: "/profile", label: "Settings" },
+  { href: "/sponsum", label: "Sponsum" }
 ] as const;
 
 export function Sidebar() {
@@ -21,7 +22,12 @@ export function Sidebar() {
         {sidebarLinks.map((item) => {
           const isActive = pathname === item.href || (item.href.includes("?") && pathname.startsWith(item.href.split("?")[0]));
           return (
-            <Link key={item.href} href={item.href} className={isActive ? "active" : ""}>
+            <Link
+              key={item.href}
+              href={item.href}
+              className={isActive ? "active" : ""}
+              data-testid={`sidebar-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+            >
               {item.label}
             </Link>
           );

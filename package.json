@@ -14,6 +14,8 @@
     "test": "npm run test:unit",
     "test:unit": "find apps packages -name '*.test.ts' -exec node --import tsx --test {} +",
     "test:integration": "find apps packages -name '*.integration.ts' -exec node --import tsx --test {} +",
+    "test:e2e": "playwright test",
+    "test:ux": "playwright test",
     "check": "npm run test && npm run typecheck && npm run build",
     "db:generate": "prisma generate --schema prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema prisma/schema.prisma",
@@ -22,6 +24,7 @@
     "db:seed": "prisma db seed --schema prisma/schema.prisma"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "concurrently": "^9.1.2",
     "postcss": "^8.5.10",
     "prisma": "^5.22.0",

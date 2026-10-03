@@ -14,6 +14,10 @@ export default function LandingPage() {
           without legal complexity.
         </p>
         <div className="primary-action-grid" style={{ marginTop: 12 }}>
+          <Link href="/sponsum" className="primary-action-card" data-testid="sponsum-entry">
+            <strong>Sponsum öffnen</strong>
+            <p>Forderung aus der Rechnung finanzieren, verkaufen oder ins Portfolio.</p>
+          </Link>
           <Link href="/claims/create" className="primary-action-card">
             <strong>Create Claim</strong>
             <p>Use the 4-step wizard and publish your deal.</p>

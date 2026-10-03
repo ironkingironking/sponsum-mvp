@@ -115,8 +115,31 @@ test("HTTP dispute and settlement dossiers 404 or resolve from workspace", async
     if (book.disputes[0]) {
       const dispute = await fetch(`${base}/api/sponsum/v1/disputes/${encodeURIComponent(book.disputes[0].dispute_id)}`);
       assert.equal(dispute.status, 200);
-      const pack = (await dispute.json()) as { asset: { receivable_id: string } };
+      const pack = (await dispute.json()) as {
+        asset: { receivable_id: string };
+        workbench: { ooc_stage: string };
+        templates: unknown[];
+      };
       assert.equal(pack.asset.receivable_id, book.disputes[0].receivable_id);
+      assert.ok(pack.workbench.ooc_stage);
+      assert.ok(Array.isArray(pack.templates) && pack.templates.length >= 4);
+      const denied = await fetch(`${base}/api/sponsum/v1/disputes/${encodeURIComponent(book.disputes[0].receivable_id)}/exports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipient: "Kanzlei", confirm: false })
+      });
+      assert.equal(denied.status, 400);
+      const exported = await fetch(`${base}/api/sponsum/v1/disputes/${encodeURIComponent(book.disputes[0].receivable_id)}/exports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipient: "Kanzlei", confirm: true })
+      });
+      assert.equal(exported.status, 200);
+      const meta = (await exported.json()) as { export: { id: string }; download: string };
+      const zip = await fetch(`${base}${meta.download}`);
+      assert.equal(zip.status, 200);
+      const bytes = Buffer.from(await zip.arrayBuffer());
+      assert.equal(bytes.subarray(0, 2).toString(), "PK");
     }
     if (book.settlements[0]) {
       const settle = await fetch(`${base}/api/sponsum/v1/settlements/${book.settlements[0].instruction_id}`);

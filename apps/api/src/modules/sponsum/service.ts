@@ -42,6 +42,7 @@ import {
   MemorySponsumStore,
   parseWechselArt,
   type AssignmentPackage,
+  type SponsumState,
   type BuyerProfile,
   type CapitalInterest,
   type CapitalKind,
@@ -53,7 +54,40 @@ import {
   type SignatureRole,
   type WechselDraft
 } from "./store.js";
+import { lookupFulfilmentBox } from "./fulfilment-bridge.js";
+import { assessJurisdiction } from "./jurisdiction-deadlines.js";
 import { buildSimplePdf } from "./pdf.js";
+import { buildZip } from "./zip.js";
+import {
+  buildFormAiInput,
+  completeOpenAiFormDraft,
+  formLinesFromModelText,
+  publicFormAiStatus,
+  resolveFormAiSettings
+} from "./form-ai.js";
+import {
+  FORM_TEMPLATES,
+  addRecordLinks,
+  briefingManifest,
+  defaultWorkbench,
+  isCourtStage,
+  isDisputeAssetAction,
+  isDisputeOutcome,
+  isFormTemplateId,
+  isOocStage,
+  justitiaComposeUrl,
+  matchParty,
+  normalizeWorkbench,
+  renderFormLines,
+  type DisputeAssetAction,
+  type DisputeContext,
+  type DisputeFormTemplateId,
+  type DisputeLifecycle,
+  type DisputeOutcome,
+  type DisputeWorkbenchRecord,
+  type PartyCard,
+  type RecordLink
+} from "./dispute-workbench.js";
 import {
   assertQualityHonored,
   createSkribbleRequest,
@@ -272,8 +306,131 @@ export class SponsumService {
       receivable_id: id,
       payload: { disputed_amount: asset.disputed_amount, resolve_case_id: asset.resolve_case_id }
     });
+    const bench = this.upsertWorkbench(state, id, asset.resolve_case_id);
+    bench.lifecycle = "open";
+    bench.close_outcome = null;
+    bench.closed_at = null;
+    bench.archived_at = null;
+    if (!bench.ooc_stage || bench.ooc_stage === "settled" || bench.ooc_stage === "withdrawn") {
+      bench.ooc_stage = asset.resolve_case_id ? "resolve" : "negotiation";
+    }
     this.store.replace(state);
     return asset;
+  }
+
+  createDispute(input: { receivable_id?: string; disputed_amount?: string; resolve_case_id?: string | null }) {
+    const receivableId = String(input.receivable_id || "").trim();
+    if (!receivableId) throw new DomainError("validation_error", "Forderung wählen.");
+    const amount = String(input.disputed_amount ?? "").trim();
+    if (!amount || Number(amount) <= 0) {
+      throw new DomainError("validation_error", "Bestrittenen Betrag grösser als 0 angeben.");
+    }
+    const existing = this.readWorkbench(this.store.snapshot(), receivableId);
+    const asset = this.getReceivable(receivableId);
+    if (existing.lifecycle === "open" && (asset.status === "DISPUTED" || asset.status === "PARTIALLY_DISPUTED")) {
+      throw new DomainError("conflict", "Dieser Streitfall ist bereits offen.");
+    }
+    this.openDispute(receivableId, amount, input.resolve_case_id || `resolve-${asset.invoice_id}`);
+    return this.disputeDossier(receivableId);
+  }
+
+  closeDispute(
+    id: string,
+    input: {
+      confirm?: unknown;
+      outcome?: string;
+      asset_action?: string;
+      notes?: string;
+    }
+  ) {
+    if (input.confirm !== true) {
+      throw new DomainError("validation_error", "Abschluss braucht eine explizite Bestätigung.");
+    }
+    if (!isDisputeOutcome(String(input.outcome || ""))) {
+      throw new DomainError("validation_error", "Ausgang wählen: Einigung oder Rückzug.");
+    }
+    const action = String(input.asset_action || "restore");
+    if (!isDisputeAssetAction(action)) {
+      throw new DomainError("validation_error", "Ungültige Forderungsfolge.");
+    }
+    const dossier = this.disputeDossier(id);
+    const state = this.store.snapshot();
+    const asset = mustAsset(state, dossier.asset.receivable_id);
+    const bench = this.upsertWorkbench(state, asset.receivable_id, asset.resolve_case_id);
+    if (bench.lifecycle === "archived") {
+      throw new DomainError("conflict", "Archivierter Fall. Zum erneuten Bearbeiten zuerst wiedereröffnen.");
+    }
+    const outcome = input.outcome as DisputeOutcome;
+    bench.ooc_stage = outcome;
+    bench.lifecycle = "closed";
+    bench.close_outcome = outcome;
+    bench.closed_at = new Date().toISOString();
+    if (input.notes !== undefined) bench.notes = input.notes;
+    this.applyDisputeAssetAction(state, asset, action);
+    this.appendEvent(state, {
+      type: "DISPUTE_CLOSED",
+      receivable_id: asset.receivable_id,
+      payload: { outcome, asset_action: action, asset_status: asset.status }
+    });
+    this.store.replace(state);
+    return this.disputeDossier(asset.receivable_id);
+  }
+
+  archiveDispute(id: string, input: { confirm?: unknown } = {}) {
+    if (input.confirm !== true) {
+      throw new DomainError("validation_error", "Archivieren braucht eine explizite Bestätigung.");
+    }
+    const dossier = this.disputeDossier(id);
+    const state = this.store.snapshot();
+    const bench = this.upsertWorkbench(state, dossier.asset.receivable_id, dossier.asset.resolve_case_id);
+    if (bench.lifecycle !== "closed") {
+      throw new DomainError("validation_error", "Nur geschlossene Streitfälle können ins Archiv.");
+    }
+    bench.lifecycle = "archived";
+    bench.archived_at = new Date().toISOString();
+    this.appendEvent(state, {
+      type: "DISPUTE_ARCHIVED",
+      receivable_id: dossier.asset.receivable_id,
+      payload: { archived_at: bench.archived_at }
+    });
+    this.store.replace(state);
+    return this.disputeDossier(dossier.asset.receivable_id);
+  }
+
+  reopenDispute(id: string, input: { disputed_amount?: string } = {}) {
+    const dossier = this.disputeDossier(id);
+    const state = this.store.snapshot();
+    const asset = mustAsset(state, dossier.asset.receivable_id);
+    const bench = this.upsertWorkbench(state, asset.receivable_id, asset.resolve_case_id);
+    if (bench.lifecycle === "open") {
+      throw new DomainError("conflict", "Der Streitfall ist bereits offen.");
+    }
+    if (asset.status === "CLOSED" || asset.status === "PAID") {
+      throw new DomainError("invalid_transition", "Geschlossene oder bezahlte Forderungen lassen sich nicht wieder bestreiten.");
+    }
+    const amount = String(input.disputed_amount || asset.disputed_amount || "0");
+    this.store.replace(state);
+    this.openDispute(asset.receivable_id, amount, asset.resolve_case_id || undefined);
+    return this.disputeDossier(asset.receivable_id);
+  }
+
+  private applyDisputeAssetAction(_state: SponsumState, asset: ReceivableAsset, action: DisputeAssetAction) {
+    if (action === "keep") return;
+    if (action === "restore") {
+      if (asset.status === "ACCEPTED" || asset.status === "CLOSED" || asset.status === "PAID") {
+        asset.disputed_amount = money("0");
+        return;
+      }
+      assertTransition(RECEIVABLE_TRANSITIONS, asset.status, "ACCEPTED", "receivable");
+      asset.status = "ACCEPTED";
+      asset.disputed_amount = money("0");
+      asset.updated_at = new Date().toISOString();
+      return;
+    }
+    if (asset.status === "CLOSED") return;
+    assertTransition(RECEIVABLE_TRANSITIONS, asset.status, "CLOSED", "receivable");
+    asset.status = "CLOSED";
+    asset.updated_at = new Date().toISOString();
   }
 
   createOffer(
@@ -811,27 +968,42 @@ export class SponsumService {
     }));
   }
 
-  listDisputes() {
-    return this.store
-      .snapshot()
-      .assets.filter((asset) => asset.status === "DISPUTED" || asset.status === "PARTIALLY_DISPUTED" || Number(asset.disputed_amount) > 0)
-      .map((asset) => ({
-        dispute_id: asset.resolve_case_id || `dispute-${asset.receivable_id}`,
-        receivable_id: asset.receivable_id,
-        invoice_id: asset.invoice_id,
-        status: asset.status,
-        nominal_amount: asset.nominal_amount,
-        accepted_amount: asset.accepted_amount,
-        disputed_amount: asset.disputed_amount,
-        resolve_case_id: asset.resolve_case_id,
-        current_holder_party_id: asset.current_holder_party_id,
-        debtor_party_id: asset.debtor_party_id
-      }));
+  listDisputes(lifecycle: DisputeLifecycle | "all" = "all") {
+    const state = this.store.snapshot();
+    const ids = new Set<string>();
+    for (const asset of state.assets) {
+      if (asset.status === "DISPUTED" || asset.status === "PARTIALLY_DISPUTED" || Number(asset.disputed_amount) > 0 || asset.resolve_case_id) {
+        ids.add(asset.receivable_id);
+      }
+    }
+    for (const bench of state.dispute_workbenches) {
+      if (bench.receivable_id) ids.add(bench.receivable_id);
+    }
+    const rows = [...ids]
+      .map((receivableId) => {
+        const asset = state.assets.find((row) => row.receivable_id === receivableId);
+        if (!asset) return null;
+        return this.presentDispute(asset, this.readWorkbench(state, asset.receivable_id, asset.resolve_case_id));
+      })
+      .filter((row): row is NonNullable<typeof row> => Boolean(row));
+    if (lifecycle === "all") return rows;
+    return rows.filter((row) => row.lifecycle === lifecycle);
+  }
+
+  listDisputeCandidates() {
+    const state = this.store.snapshot();
+    const openIds = new Set(this.listDisputes("open").map((row) => row.receivable_id));
+    return state.assets.filter((asset) => {
+      if (openIds.has(asset.receivable_id)) return false;
+      if (asset.status === "CLOSED" || asset.status === "PAID") return false;
+      const next = RECEIVABLE_TRANSITIONS[asset.status] || [];
+      return next.includes("DISPUTED") || next.includes("PARTIALLY_DISPUTED");
+    });
   }
 
   disputeDossier(id: string) {
     const key = decodeURIComponent(id);
-    const dispute = this.listDisputes().find(
+    const dispute = this.listDisputes("all").find(
       (row) =>
         row.dispute_id === key ||
         row.resolve_case_id === key ||
@@ -840,7 +1012,433 @@ export class SponsumService {
     );
     if (!dispute) throw new DomainError("not_found", "Streitfall nicht gefunden");
     const pack = this.dossier(dispute.receivable_id);
-    return { dispute, ...pack };
+    const state = this.store.snapshot();
+    const workbench = this.ensureAutoLinks(state, pack.asset);
+    if (!principal()) this.store.replace(state);
+    const fulfilment = this.lookupFulfilment(pack.asset, workbench);
+    if (fulfilment) {
+      workbench.links = addRecordLinks(workbench.links, [
+        { doctype: "Fulfilment Case", name: fulfilment.id, label: `Fulfillment Box ${fulfilment.id}` }
+      ]);
+      if (!principal()) this.store.replace(state);
+    }
+    return {
+      dispute,
+      workbench,
+      fulfilment,
+      venue: this.assessVenue(pack.asset, workbench, fulfilment, {
+        family: workbench.procedure_family || undefined,
+        from: workbench.deadline_start || pack.asset.issue_date
+      }),
+      templates: FORM_TEMPLATES,
+      form_ai: publicFormAiStatus(),
+      catalog: this.disputeCatalog(pack.asset),
+      justitia: this.justitiaLinks(pack.asset),
+      ...pack
+    };
+  }
+
+  async assessDisputeVenue(id: string, options: { family?: string; from?: string | null } = {}) {
+    const dossier = this.disputeDossier(id);
+    const ctx = await this.enrichDisputeContext(dossier.asset, dossier.workbench);
+    ctx.fulfilment = dossier.fulfilment || ctx.fulfilment;
+    return assessJurisdiction(ctx, {
+      family: options.family || dossier.workbench.procedure_family || undefined,
+      from: options.from || dossier.workbench.deadline_start || ctx.issue_date
+    });
+  }
+
+  listDisputeTemplates() {
+    return FORM_TEMPLATES;
+  }
+
+  updateDisputeTrack(
+    id: string,
+    input: {
+      ooc_stage?: string;
+      court_stage?: string;
+      eschkg_case_id?: string | null;
+      procedure_family?: string | null;
+      deadline_start?: string | null;
+      notes?: string;
+    }
+  ) {
+    const dossier = this.disputeDossier(id);
+    const state = this.store.snapshot();
+    const bench = this.upsertWorkbench(state, dossier.asset.receivable_id, dossier.asset.resolve_case_id);
+    if (input.ooc_stage !== undefined) {
+      if (!isOocStage(input.ooc_stage)) {
+        throw new DomainError("validation_error", "Unbekannte aussergerichtliche Stufe.");
+      }
+      bench.ooc_stage = input.ooc_stage;
+    }
+    if (input.court_stage !== undefined) {
+      if (!isCourtStage(input.court_stage)) {
+        throw new DomainError("validation_error", "Unbekannte staatliche Stufe.");
+      }
+      bench.court_stage = input.court_stage;
+    }
+    if (input.eschkg_case_id !== undefined) {
+      bench.eschkg_case_id = input.eschkg_case_id?.trim() || null;
+    }
+    if (input.notes !== undefined) {
+      bench.notes = input.notes;
+    }
+    if (input.procedure_family !== undefined) {
+      const family = String(input.procedure_family || "");
+      bench.procedure_family =
+        family === "zpo" || family === "stpo" || family === "admin" || family === "schkg" ? family : null;
+    }
+    if (input.deadline_start !== undefined) {
+      bench.deadline_start = input.deadline_start?.trim() || null;
+    }
+    this.appendEvent(state, {
+      type: "DISPUTE_TRACK_UPDATED",
+      receivable_id: bench.receivable_id,
+      payload: { ooc_stage: bench.ooc_stage, court_stage: bench.court_stage, eschkg_case_id: bench.eschkg_case_id }
+    });
+    this.store.replace(state);
+    return this.disputeDossier(bench.receivable_id);
+  }
+
+  linkDispute(id: string, incoming: RecordLink[]) {
+    const dossier = this.disputeDossier(id);
+    const state = this.store.snapshot();
+    const bench = this.upsertWorkbench(state, dossier.asset.receivable_id, dossier.asset.resolve_case_id);
+    bench.links = addRecordLinks(bench.links, incoming);
+    this.appendEvent(state, {
+      type: "DISPUTE_TRACK_UPDATED",
+      receivable_id: bench.receivable_id,
+      payload: { linked: incoming.map((row) => `${row.doctype}:${row.name}`) }
+    });
+    this.store.replace(state);
+    return this.disputeDossier(bench.receivable_id);
+  }
+
+  async generateDisputeForm(
+    id: string,
+    templateId: string,
+    input: {
+      instruction?: string;
+      use_ai?: boolean;
+      complete?: typeof completeOpenAiFormDraft;
+    } = {}
+  ) {
+    if (!isFormTemplateId(templateId)) {
+      throw new DomainError("validation_error", "Unbekannte Vorlage.");
+    }
+    const dossier = this.disputeDossier(id);
+    const ctx = await this.enrichDisputeContext(dossier.asset, dossier.workbench);
+    ctx.venue = assessJurisdiction(ctx, {
+      family: dossier.workbench.procedure_family || undefined,
+      from: dossier.workbench.deadline_start || ctx.issue_date
+    });
+    const template = FORM_TEMPLATES.find((row) => row.id === templateId)!;
+    const settings = resolveFormAiSettings();
+    const wantAi = input.use_ai !== false && settings.enabled;
+    let lines = renderFormLines(templateId as DisputeFormTemplateId, ctx);
+    let source: "template" | "openai" = "template";
+    let warning: string | undefined;
+    if (wantAi) {
+      try {
+        const prompt = buildFormAiInput({
+          template,
+          ctx,
+          instruction: input.instruction
+        });
+        const complete = input.complete ?? completeOpenAiFormDraft;
+        const text = await complete(settings, prompt);
+        const drafted = formLinesFromModelText(text);
+        if (!drafted.length) {
+          throw new Error("openai_empty");
+        }
+        lines = [
+          ...drafted,
+          "Dies ist ein Entwurf. Kein Rechtsrat. Kein amtliches Formular."
+        ];
+        source = "openai";
+      } catch {
+        warning = "OpenAI nicht erreichbar — Vorlagentext verwendet.";
+      }
+    } else if (input.use_ai !== false && !settings.enabled) {
+      warning = "OpenAI ist nicht konfiguriert — Vorlagentext verwendet.";
+    }
+    const form = {
+      id: `frm-${randomUUID()}`,
+      template_id: templateId as DisputeFormTemplateId,
+      title: template.title,
+      created_at: new Date().toISOString(),
+      lines,
+      source
+    };
+    const state = this.store.snapshot();
+    const bench = this.upsertWorkbench(state, ctx.receivable_id, ctx.resolve_case_id);
+    bench.forms.unshift(form);
+    this.appendEvent(state, {
+      type: "DISPUTE_FORM_DRAFTED",
+      receivable_id: ctx.receivable_id,
+      payload: { form_id: form.id, template_id: templateId, justitia: template.justitia, source }
+    });
+    this.store.replace(state);
+    return {
+      form,
+      source,
+      form_ai: publicFormAiStatus(),
+      justitia: template.justitia ? this.justitiaLinks(dossier.asset) : null,
+      disclaimer: "Entwurf. Kein Rechtsrat. Einreichen nur mit Bestätigung in Justitia.",
+      warning
+    };
+  }
+
+  disputeFormPdf(id: string, formId: string) {
+    const dossier = this.disputeDossier(id);
+    const form = dossier.workbench.forms.find((row) => row.id === formId);
+    if (!form) throw new DomainError("not_found", "Formularentwurf nicht gefunden");
+    return {
+      filename: `${form.template_id}-${dossier.asset.receivable_id}.pdf`,
+      type: "application/pdf",
+      buffer: buildSimplePdf(form.title, form.lines)
+    };
+  }
+
+  createDisputeExport(id: string, input: { recipient?: string; confirm?: unknown }) {
+    if (input.confirm !== true) {
+      throw new DomainError("validation_error", "Export an eine Fachperson braucht eine explizite Bestätigung.");
+    }
+    const recipient = String(input.recipient || "").trim();
+    if (recipient.length < 2) {
+      throw new DomainError("validation_error", "Empfängerin oder Empfänger der Fachperson angeben.");
+    }
+    const dossier = this.disputeDossier(id);
+    const record = {
+      id: `exp-${randomUUID()}`,
+      recipient,
+      created_at: new Date().toISOString(),
+      filename: `sponsum-briefing-${dossier.asset.receivable_id}.zip`
+    };
+    const state = this.store.snapshot();
+    const bench = this.upsertWorkbench(state, dossier.asset.receivable_id, dossier.asset.resolve_case_id);
+    bench.exports.unshift(record);
+    this.appendEvent(state, {
+      type: "DISPUTE_BRIEFING_EXPORTED",
+      receivable_id: dossier.asset.receivable_id,
+      payload: { export_id: record.id, recipient }
+    });
+    this.store.replace(state);
+    return {
+      export: record,
+      download: `/api/sponsum/v1/disputes/${encodeURIComponent(dossier.asset.receivable_id)}/exports/${record.id}`
+    };
+  }
+
+  disputeExportZip(id: string, exportId: string) {
+    const dossier = this.disputeDossier(id);
+    const record = dossier.workbench.exports.find((row) => row.id === exportId);
+    if (!record) throw new DomainError("not_found", "Export nicht gefunden");
+    const ctx = this.disputeContext(dossier.asset);
+    const workbench = dossier.workbench;
+    const cover = buildSimplePdf(`Zu Handen ${record.recipient}`, [
+      "Sponsum-Streitdossier — kein Ersatz für die Justizakte.",
+      `Empfänger ${record.recipient}`,
+      `Forderung ${ctx.receivable_id}`,
+      `Rechnung ${ctx.invoice_id}`,
+      `Inhaber ${ctx.current_holder_party_id} (Holder gewinnt gegen Origin-Glaubiger)`,
+      `Resolve ${ctx.resolve_case_id || "—"}`,
+      `Aussergerichtlich ${workbench.ooc_stage}`,
+      `Staatlich ${workbench.court_stage}`,
+      `eSchKG ${workbench.eschkg_case_id || "—"}`,
+      "Nicht enthalten: vollständige Gerichtsakte, unbestätigte Justitia-Submit, Rechtsrat."
+    ]);
+    const files = [
+      {
+        name: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify(briefingManifest({ ctx, workbench, exportedAt: record.created_at, recipient: record.recipient }), null, 2),
+          "utf8"
+        )
+      },
+      { name: "cover.pdf", data: cover }
+    ];
+    for (const form of workbench.forms) {
+      files.push({
+        name: `forms/${form.template_id}-${form.id.slice(0, 8)}.pdf`,
+        data: buildSimplePdf(form.title, form.lines)
+      });
+    }
+    return {
+      filename: record.filename,
+      type: "application/zip",
+      buffer: buildZip(files)
+    };
+  }
+
+  private justitiaSuiteUrl(): string {
+    return (process.env.MOVENA_JUSTITIA_SUITE_URL || "https://suite.movena.ch/justitia/").replace(/\/?$/, "/");
+  }
+
+  private justitiaLinks(asset: ReceivableAsset) {
+    const inbox = this.justitiaSuiteUrl();
+    return {
+      inbox_url: inbox,
+      compose_url: justitiaComposeUrl({
+        suiteJustitiaUrl: inbox,
+        receivableId: asset.receivable_id,
+        holderPartyId: asset.current_holder_party_id,
+        originCreditorPartyId: asset.creditor_party_id
+      })
+    };
+  }
+
+  private disputeContext(asset: ReceivableAsset, workbench?: DisputeWorkbenchRecord): DisputeContext {
+    return {
+      receivable_id: asset.receivable_id,
+      invoice_id: asset.invoice_id,
+      status: asset.status,
+      currency: asset.currency,
+      nominal_amount: asset.nominal_amount,
+      accepted_amount: asset.accepted_amount,
+      disputed_amount: asset.disputed_amount,
+      outstanding_amount: asset.outstanding_amount,
+      issue_date: asset.issue_date,
+      maturity_date: asset.maturity_date,
+      debtor_party_id: asset.debtor_party_id,
+      origin_creditor_party_id: asset.creditor_party_id,
+      current_holder_party_id: asset.current_holder_party_id,
+      resolve_case_id: asset.resolve_case_id ?? null,
+      links: workbench?.links ?? [],
+      ooc_stage: workbench?.ooc_stage,
+      court_stage: workbench?.court_stage,
+      eschkg_case_id: workbench?.eschkg_case_id ?? null
+    };
+  }
+
+  private async enrichDisputeContext(asset: ReceivableAsset, workbench: DisputeWorkbenchRecord): Promise<DisputeContext> {
+    const ctx = this.disputeContext(asset, workbench);
+    const parties = await this.listParties();
+    const cards: PartyCard[] = [...(parties.companies || []), ...(parties.customers || [])];
+    rememberPartyCards(cards);
+    const debtor = matchParty(asset.debtor_party_id, cards);
+    return {
+      ...ctx,
+      debtor,
+      holder: matchParty(asset.current_holder_party_id, cards),
+      origin_creditor: matchParty(asset.creditor_party_id, cards),
+      links: workbench.links,
+      fulfilment: this.lookupFulfilment(asset, workbench, debtor.name)
+    };
+  }
+
+  private lookupFulfilment(asset: ReceivableAsset, workbench: DisputeWorkbenchRecord, customerName?: string) {
+    if (principal()) return null;
+    const so = workbench.links.find((row) => /sales order|auftrag/i.test(row.doctype + row.label));
+    return lookupFulfilmentBox({
+      invoiceId: asset.invoice_id,
+      debtorId: asset.debtor_party_id,
+      customer: customerName,
+      salesOrderId: so?.name
+    });
+  }
+
+  private assessVenue(
+    asset: ReceivableAsset,
+    workbench: DisputeWorkbenchRecord,
+    fulfilment: ReturnType<SponsumService["lookupFulfilment"]>,
+    options: { family?: string; from?: string | null } = {}
+  ) {
+    const cards = partyCardsForVenue(this.store.snapshot());
+    return assessJurisdiction(
+      {
+        receivable_id: asset.receivable_id,
+        invoice_id: asset.invoice_id,
+        status: asset.status,
+        currency: asset.currency,
+        nominal_amount: asset.nominal_amount,
+        accepted_amount: asset.accepted_amount,
+        disputed_amount: asset.disputed_amount,
+        outstanding_amount: asset.outstanding_amount,
+        issue_date: options.from || asset.issue_date,
+        maturity_date: asset.maturity_date,
+        debtor_party_id: asset.debtor_party_id,
+        origin_creditor_party_id: asset.creditor_party_id,
+        current_holder_party_id: asset.current_holder_party_id,
+        resolve_case_id: asset.resolve_case_id ?? null,
+        debtor: matchParty(asset.debtor_party_id, cards),
+        holder: matchParty(asset.current_holder_party_id, cards),
+        origin_creditor: matchParty(asset.creditor_party_id, cards),
+        links: workbench.links,
+        ooc_stage: workbench.ooc_stage,
+        court_stage: workbench.court_stage,
+        eschkg_case_id: workbench.eschkg_case_id,
+        fulfilment
+      },
+      {
+        family: options.family || workbench.procedure_family || undefined,
+        from: options.from || workbench.deadline_start || asset.issue_date
+      }
+    );
+  }
+
+  private disputeCatalog(asset: ReceivableAsset) {
+    const state = this.store.snapshot();
+    const items: RecordLink[] = [
+      { doctype: "ReceivableAsset", name: asset.receivable_id, label: `Asset ${asset.receivable_id}` },
+      { doctype: "Sales Invoice", name: asset.invoice_id, label: `Rechnung ${asset.invoice_id}` }
+    ];
+    if (asset.resolve_case_id) {
+      items.push({ doctype: "Resolve-Case", name: asset.resolve_case_id, label: asset.resolve_case_id });
+    }
+    for (const row of state.assignments.filter((item) => item.receivable_id === asset.receivable_id && item.assignment_id)) {
+      items.push({ doctype: "Assignment", name: row.assignment_id, label: `Zession ${row.assignment_id}` });
+    }
+    return items;
+  }
+
+  private ensureAutoLinks(state: SponsumState, asset: ReceivableAsset): DisputeWorkbenchRecord {
+    const bench = this.upsertWorkbench(state, asset.receivable_id, asset.resolve_case_id);
+    const extras: RecordLink[] = this.disputeCatalog(asset);
+    if (bench.eschkg_case_id) {
+      extras.push({ doctype: "eSchKG Case", name: bench.eschkg_case_id, label: bench.eschkg_case_id });
+    }
+    bench.links = addRecordLinks(bench.links || [], extras);
+    return bench;
+  }
+
+  private presentDispute(asset: ReceivableAsset, workbench: DisputeWorkbenchRecord) {
+    return {
+      dispute_id: asset.resolve_case_id || `dispute-${asset.receivable_id}`,
+      receivable_id: asset.receivable_id,
+      invoice_id: asset.invoice_id,
+      status: asset.status,
+      nominal_amount: asset.nominal_amount,
+      accepted_amount: asset.accepted_amount,
+      disputed_amount: asset.disputed_amount,
+      resolve_case_id: asset.resolve_case_id,
+      current_holder_party_id: asset.current_holder_party_id,
+      debtor_party_id: asset.debtor_party_id,
+      ooc_stage: workbench.ooc_stage,
+      court_stage: workbench.court_stage,
+      eschkg_case_id: workbench.eschkg_case_id,
+      lifecycle: workbench.lifecycle,
+      close_outcome: workbench.close_outcome,
+      closed_at: workbench.closed_at,
+      archived_at: workbench.archived_at,
+      justitia: this.justitiaLinks(asset)
+    };
+  }
+
+  private readWorkbench(state: SponsumState, receivableId: string, resolveCaseId?: string | null): DisputeWorkbenchRecord {
+    const existing = state.dispute_workbenches.find((row) => row.receivable_id === receivableId);
+    return normalizeWorkbench(existing ?? defaultWorkbench(receivableId, resolveCaseId), receivableId);
+  }
+
+  private upsertWorkbench(state: SponsumState, receivableId: string, resolveCaseId?: string | null): DisputeWorkbenchRecord {
+    const existing = state.dispute_workbenches.find((row) => row.receivable_id === receivableId);
+    if (existing) {
+      return existing;
+    }
+    const created = defaultWorkbench(receivableId, resolveCaseId);
+    state.dispute_workbenches.push(created);
+    return created;
   }
 
   dossier(receivableId: string) {
@@ -887,7 +1485,7 @@ export class SponsumService {
         receivables: state.assets.length,
         live_offers: live.length,
         trades: state.trades.length,
-        disputed: this.listDisputes().length,
+        disputed: this.listDisputes("open").length,
         transferred: state.assets.filter((asset) => asset.status === "TRANSFERRED").length,
         holds_customer_funds: false
       },
@@ -895,7 +1493,8 @@ export class SponsumService {
       discovery: live,
       trades: this.listTrades(),
       settlements: this.listSettlements(),
-      disputes: this.listDisputes(),
+      disputes: this.listDisputes("all"),
+      dispute_candidates: this.listDisputeCandidates(),
       events: state.events.slice(-40).reverse(),
       accounting: state.accounting,
       kyc: state.kyc,
@@ -1698,6 +2297,12 @@ export class SponsumService {
       evidence: { ...FULL_EVIDENCE, hasDispute: true }
     });
     this.openDispute(disputed.receivable_id, "10000", "resolve-INV-2026-533");
+    this.updateDisputeTrack(disputed.receivable_id, {
+      ooc_stage: "resolve",
+      court_stage: "eschkg",
+      eschkg_case_id: "ESCHK-2026-00007",
+      notes: "Demo: aussergerichtlich bei Resolve, parallel Betreibung erfasst."
+    });
 
     const listed = this.createReceivable({
       invoice_id: "INV-2026-540",
@@ -1992,7 +2597,9 @@ type PartyRow = {
   disabled?: boolean;
   city?: string | null;
   country?: string | null;
+  address?: string | null;
   iban?: string | null;
+  tax_id?: string | null;
   currency?: string;
   territory?: string | null;
 };
@@ -2089,19 +2696,53 @@ async function fetchErpNextParties(): Promise<{ companies: PartyRow[]; customers
   return { companies: [], customers: [] };
 }
 
+let partyCardCache: { at: number; cards: PartyCard[] } | null = null;
+
+function rememberPartyCards(cards: PartyCard[]) {
+  partyCardCache = { at: Date.now(), cards };
+}
+
+function partyCardsForVenue(state: ReturnType<MemorySponsumStore["snapshot"]>): PartyCard[] {
+  if (!principal() && partyCardCache && Date.now() - partyCardCache.at < 120_000) {
+    return partyCardCache.cards;
+  }
+  const local = localPartiesFromState(state);
+  return [...local.companies, ...local.customers];
+}
+
+const DEMO_PARTY_GEO: Record<string, Pick<PartyRow, "name" | "city" | "country" | "kind">> = {
+  "debtor-nord": { name: "Nordholz AG", city: "Winterthur", country: "Schweiz", kind: "customer" },
+  "debtor-helvetia": { name: "Helvetia Industrie AG", city: "Zürich", country: "Schweiz", kind: "customer" },
+  "debtor-alpine": { name: "Alpine Components AG", city: "Chur", country: "Schweiz", kind: "customer" },
+  "debtor-industria": { name: "Industria AG", city: "Baden", country: "Schweiz", kind: "customer" },
+  "debtor-abc": { name: "ABC Werkstoffe AG", city: "Aarau", country: "Schweiz", kind: "customer" },
+  "seller-ui": { name: "Movena GmbH", city: "Zürich", country: "Schweiz", kind: "company" },
+  "seller-1": { name: "Movena GmbH", city: "Zürich", country: "Schweiz", kind: "company" }
+};
+
 function localPartiesFromState(state: ReturnType<MemorySponsumStore["snapshot"]>): {
   companies: PartyRow[];
   customers: PartyRow[];
 } {
   const customers = new Map<string, PartyRow>();
-  for (const asset of state.assets) {
-    customers.set(asset.debtor_party_id, {
-      id: asset.debtor_party_id,
-      name: asset.debtor_party_id.replace(/^customer:/, ""),
-      kind: "customer"
+  const companies = new Map<string, PartyRow>();
+  const apply = (id: string, fallbackKind: "customer" | "company", bucket: Map<string, PartyRow>) => {
+    if (!id || bucket.has(id)) return;
+    const demo = DEMO_PARTY_GEO[id];
+    bucket.set(id, {
+      id,
+      name: demo?.name || id.replace(/^(customer:|company:)/, ""),
+      kind: demo?.kind || fallbackKind,
+      city: demo?.city ?? null,
+      country: demo?.country ?? null
     });
+  };
+  for (const asset of state.assets) {
+    apply(asset.debtor_party_id, "customer", customers);
+    apply(asset.current_holder_party_id, "company", companies);
+    apply(asset.creditor_party_id, "company", companies);
   }
-  return { companies: [], customers: [...customers.values()] };
+  return { companies: [...companies.values()], customers: [...customers.values()] };
 }
 
 function mergeParties(

@@ -10,3 +10,7 @@ prisma/dev.db
 *.tsbuildinfo
 .vercel
 apps/web/.next.bak*
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

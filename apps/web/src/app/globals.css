@@ -1113,6 +1113,43 @@ button.ghost {
   color: #166534;
 }
 
+.sponsum-invoice-panel,
+.sponsum-portfolio {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px 22px;
+  display: grid;
+  gap: 12px;
+}
+
+.sponsum-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.sponsum-actions a {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #eef2f7;
+  font-weight: 600;
+}
+
+.sponsum-quotes,
+.sponsum-settlement {
+  border: 1px solid #dbe4ef;
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #f8fafc;
+}
+
+.sponsum-quotes ul {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+
 .dispute-target-badge {
   display: inline-flex;
   border: 1px solid currentColor;

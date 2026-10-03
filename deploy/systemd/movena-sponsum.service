@@ -1,0 +1,17 @@
+[Unit]
+Description=Movena Sponsum API + desk
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/docker/movena-sponsum/current
+EnvironmentFile=/opt/docker/movena-sponsum/.env
+ExecStart=/usr/bin/npx tsx apps/api/src/index.ts
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

@@ -10,6 +10,42 @@ sponsumRouter.post("/access/:kind/:id", (req, res) => {
   handle(() => sponsumService.shareReadAccess(req.params.kind, req.params.id, req.body?.readers), res);
 });
 
+function sendDomainError(error: unknown, res: import("express").Response): boolean {
+  if (!(error instanceof DomainError)) {
+    return false;
+  }
+  const status =
+    error.code === "not_found"
+      ? 404
+      : error.code === "forbidden" || error.code === "kyc_required"
+        ? 403
+        : error.code === "policy_denied" || error.code === "skribble_quality_downgraded"
+          ? 403
+          : error.code === "skribble_not_configured" || error.code === "skribble_unreachable"
+            ? 503
+            : error.code === "validation_error"
+              ? 400
+              : 409;
+  res.status(status).json({ error: { code: error.code, message: error.message } });
+  return true;
+}
+
+function handleDownload(
+  run: () => { filename: string; type: string; buffer: Buffer },
+  res: import("express").Response
+): void {
+  try {
+    const file = run();
+    res.setHeader("Content-Type", file.type);
+    res.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+    res.send(file.buffer);
+  } catch (error) {
+    if (!sendDomainError(error, res)) {
+      throw error;
+    }
+  }
+}
+
 function handle(run: () => unknown, res: import("express").Response): void {
   try {
     const body = run();
@@ -17,31 +53,17 @@ function handle(run: () => unknown, res: import("express").Response): void {
       (body as Promise<unknown>)
         .then((value) => res.json(value))
         .catch((error) => {
-          if (error instanceof DomainError) {
-            res.status(409).json({ error: { code: error.code, message: error.message } });
-            return;
+          if (!sendDomainError(error, res)) {
+            throw error;
           }
-          throw error;
         });
       return;
     }
     res.json(body);
   } catch (error) {
-    if (error instanceof DomainError) {
-      const status =
-        error.code === "not_found"
-          ? 404
-          : error.code === "forbidden" || error.code === "kyc_required"
-            ? 403
-            : error.code === "policy_denied" || error.code === "skribble_quality_downgraded"
-              ? 403
-              : error.code === "skribble_not_configured" || error.code === "skribble_unreachable"
-                ? 503
-                : 409;
-      res.status(status).json({ error: { code: error.code, message: error.message } });
-      return;
+    if (!sendDomainError(error, res)) {
+      throw error;
     }
-    throw error;
   }
 }
 
@@ -65,12 +87,79 @@ sponsumRouter.get("/settlements", (_req, res) => {
   handle(() => sponsumService.listSettlements(), res);
 });
 
-sponsumRouter.get("/disputes", (_req, res) => {
-  handle(() => sponsumService.listDisputes(), res);
+sponsumRouter.get("/disputes", (req, res) => {
+  const lifecycle = typeof req.query.lifecycle === "string" ? req.query.lifecycle : "all";
+  handle(
+    () =>
+      sponsumService.listDisputes(
+        lifecycle === "open" || lifecycle === "closed" || lifecycle === "archived" || lifecycle === "all"
+          ? lifecycle
+          : "all"
+      ),
+    res
+  );
+});
+
+sponsumRouter.post("/disputes", (req, res) => {
+  handle(() => sponsumService.createDispute(req.body ?? {}), res);
+});
+
+sponsumRouter.get("/disputes/templates", (_req, res) => {
+  handle(() => sponsumService.listDisputeTemplates(), res);
 });
 
 sponsumRouter.get("/disputes/:id", (req, res) => {
   handle(() => sponsumService.disputeDossier(req.params.id), res);
+});
+
+sponsumRouter.get("/disputes/:id/venue", (req, res) => {
+  const family = typeof req.query.family === "string" ? req.query.family : undefined;
+  const from = typeof req.query.from === "string" ? req.query.from : undefined;
+  handle(() => sponsumService.assessDisputeVenue(req.params.id, { family, from }), res);
+});
+
+sponsumRouter.post("/disputes/:id/track", (req, res) => {
+  handle(() => sponsumService.updateDisputeTrack(req.params.id, req.body ?? {}), res);
+});
+
+sponsumRouter.post("/disputes/:id/close", (req, res) => {
+  handle(() => sponsumService.closeDispute(req.params.id, req.body ?? {}), res);
+});
+
+sponsumRouter.post("/disputes/:id/archive", (req, res) => {
+  handle(() => sponsumService.archiveDispute(req.params.id, req.body ?? {}), res);
+});
+
+sponsumRouter.post("/disputes/:id/reopen", (req, res) => {
+  handle(() => sponsumService.reopenDispute(req.params.id, req.body ?? {}), res);
+});
+
+sponsumRouter.post("/disputes/:id/links", (req, res) => {
+  const incoming = Array.isArray(req.body?.links) ? req.body.links : [];
+  handle(() => sponsumService.linkDispute(req.params.id, incoming), res);
+});
+
+sponsumRouter.post("/disputes/:id/forms", (req, res) => {
+  handle(
+    () =>
+      sponsumService.generateDisputeForm(req.params.id, String(req.body?.template_id || ""), {
+        instruction: req.body?.instruction ? String(req.body.instruction) : undefined,
+        use_ai: req.body?.use_ai !== false
+      }),
+    res
+  );
+});
+
+sponsumRouter.get("/disputes/:id/forms/:formId/pdf", (req, res) => {
+  handleDownload(() => sponsumService.disputeFormPdf(req.params.id, req.params.formId), res);
+});
+
+sponsumRouter.post("/disputes/:id/exports", (req, res) => {
+  handle(() => sponsumService.createDisputeExport(req.params.id, req.body ?? {}), res);
+});
+
+sponsumRouter.get("/disputes/:id/exports/:exportId", (req, res) => {
+  handleDownload(() => sponsumService.disputeExportZip(req.params.id, req.params.exportId), res);
 });
 
 sponsumRouter.get("/events", (_req, res) => {

@@ -76,6 +76,7 @@ body.sp-app {
 
 h1 { margin: 0 0 6px; font-size: 22px; }
 h2 { margin: 0 0 10px; font-size: 16px; }
+h3 { margin: 14px 0 8px; font-size: 14px; }
 .lead, .muted { color: var(--muted); }
 
 .kpis {
@@ -93,6 +94,23 @@ h2 { margin: 0 0 10px; font-size: 16px; }
 }
 .kpi strong { display: block; font-size: 22px; }
 .kpi span { color: var(--muted); font-size: 12px; }
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 14px;
+}
+.tabs a {
+  padding: 6px 10px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--ink);
+  background: #e8eef5;
+  font-weight: 600;
+  font-size: 13px;
+}
+.tabs a.is-on { background: var(--brand); color: #fff; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 
@@ -192,6 +210,19 @@ input, select, textarea {
   color: var(--ink);
 }
 
+label.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--ink); }
+label.check input { width: auto; margin-top: 3px; }
+.plain-list { margin: 12px 0 0; padding-left: 18px; }
+.links { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.chip { padding: 3px 8px; border-radius: 999px; background: var(--soft); font-size: 0.78rem; font-weight: 700; }
+.form-draft {
+  margin: 8px 0 0;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font: 13px/1.45 ui-sans-serif, system-ui, sans-serif;
+}
+button.linkish { background: none; color: var(--brand); padding: 0; font-weight: 700; }
 .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 13px; }
 .check-ok { color: var(--ok); }
 .check-no { color: var(--danger); }

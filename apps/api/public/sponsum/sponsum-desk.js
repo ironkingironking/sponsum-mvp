@@ -97,7 +97,22 @@ const STATUS_LABELS = {
   DRAWEE: "Bezogener",
   TRANSFEROR: "Zedent",
   TRANSFEREE: "Zessionar",
-  SUITE_CONFIRM: "Bestätigung in der Suite"
+  SUITE_CONFIRM: "Bestätigung in der Suite",
+  negotiation: "Verhandlung",
+  mediation: "Mediation",
+  resolve: "Movena Resolve",
+  settled: "Verglichen",
+  withdrawn: "Zurückgezogen",
+  idle: "Noch nicht eröffnet",
+  eschkg: "eSchKG / Betreibung",
+  justitia_inbox: "Justitia-Zustellung",
+  justitia_filed: "Justitia-Eingabe",
+  open: "Offen",
+  closed: "Geschlossen",
+  archived: "Archiviert",
+  restore: "Forderung wieder freigeben",
+  close_asset: "Forderung schliessen",
+  keep: "Forderungsstatus belassen"
 };
 
 function labelOf(code) {
@@ -158,15 +173,44 @@ function emptyRow(cols, text) {
 }
 
 async function api(path, options) {
-  const response = await fetch(`${API}${path}`, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options && options.headers) }
-  });
-  const body = await response.json().catch(() => ({}));
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), 55000);
+  try {
+    const response = await fetch(`${API}${path}`, {
+      ...options,
+      signal: ctrl.signal,
+      headers: { "Content-Type": "application/json", ...(options && options.headers) }
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error((body.error && (body.error.message || body.error.code)) || `HTTP ${response.status}`);
+    }
+    return body;
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("Zeitüberschreitung: der Entwurf konnte nicht erzeugt werden.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+async function downloadPath(path, filename) {
+  const response = await fetch(`${API}${path}`);
   if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
     throw new Error((body.error && (body.error.message || body.error.code)) || `HTTP ${response.status}`);
   }
-  return body;
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename || "download";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 async function loadWorkspace() {
@@ -240,7 +284,7 @@ function stammdatenHint() {
 }
 
 function navKey() {
-  const hash = window.location.hash || "#/hub";
+  const hash = (window.location.hash || "#/hub").split("?")[0];
   if (hash.startsWith("#/receivables/")) return "receivables";
   if (hash.startsWith("#/wechsel")) return "wechsel";
   if (hash.startsWith("#/market/")) return "market";
@@ -313,7 +357,7 @@ async function route() {
 }
 
 function errorLine() {
-  return lastError ? `<p class="error">${lastError}</p>` : "";
+  return lastError ? `<p class="error" role="alert">${esc(lastError)}</p>` : "";
 }
 
 function notFoundCard(title, message, backHref, backLabel) {
@@ -352,6 +396,252 @@ function eventTable(events) {
       }
     </tbody>
   </table>`;
+}
+
+function renderVenueCard(venue, bench) {
+  if (!venue) {
+    return `<section class="card" id="venue-card"><h2>Gerichtsstand und Fristen</h2><p class="muted">Keine Ermittlung.</p></section>`;
+  }
+  const due = (row) =>
+    row.due ? row.due.slice(8, 10) + "." + row.due.slice(5, 7) + "." + row.due.slice(0, 4) : "Startdatum fehlt";
+  const startValue = bench?.deadline_start || venue.deadlines?.find((row) => row.start)?.start || "";
+  return `<section class="card" id="venue-card">
+    <h2>Gerichtsstand, Zuständigkeit, Fristen</h2>
+    <p class="muted">Unabhängig vom Formulargenerator. Kein Schreiben nötig. Kein Rechtsrat.</p>
+    <p>${esc(venue.family_label)}${venue.inferred ? " · automatisch aus Aktenlage" : ""} · ${esc(venue.canton || "Kanton offen")} (${esc(venue.canton_source || "")})</p>
+    ${venue.procedure ? `<p>${esc(venue.procedure)}</p>` : ""}
+    <form id="venue-form" class="stack" action="#" method="get">
+      <div class="grid-2">
+        <label>Rechtsgebiet
+          <select name="family" id="venue-family">
+            <option value="zpo" ${venue.family === "zpo" ? "selected" : ""}>ZPO Zivil</option>
+            <option value="stpo" ${venue.family === "stpo" ? "selected" : ""}>StPO Straf</option>
+            <option value="admin" ${venue.family === "admin" ? "selected" : ""}>Verwaltungsrechtspflege</option>
+            <option value="schkg" ${venue.family === "schkg" ? "selected" : ""}>SchKG Betreibung</option>
+          </select>
+        </label>
+        <label>Fristbeginn (Zustellung)
+          <input type="date" name="from" id="venue-from" value="${esc(startValue)}" />
+        </label>
+      </div>
+      <div class="actions"><button class="btn ghost" id="venue-btn" type="button">Neu ermitteln</button></div>
+      <p class="muted" id="venue-status" role="status"></p>
+    </form>
+    <div class="grid-2">
+      <div>
+        <h3>Gerichtsstände</h3>
+        ${(venue.venues || []).map((row) => `<p><strong>${esc(row.title)}</strong><br><span class="muted">${esc(row.basis)} — ${esc(row.detail)}</span></p>`).join("")}
+      </div>
+      <div>
+        <h3>Behörden / Zuständigkeit</h3>
+        ${(venue.authorities || []).map((row) => `<p><strong>${esc(row.title)}</strong><br><span class="muted">${esc(row.basis)} — ${esc(row.detail)}</span></p>`).join("")}
+      </div>
+    </div>
+    <h3>Fristen</h3>
+    <table>
+      <thead><tr><th>Frist</th><th>Tage</th><th>Grundlage</th><th>Ablauf</th></tr></thead>
+      <tbody>
+        ${(venue.deadlines || [])
+          .map(
+            (row) =>
+              `<tr><td>${esc(row.title)}</td><td>${row.days}</td><td>${esc(row.basis)}</td><td>${esc(due(row))}</td></tr>`
+          )
+          .join("")}
+      </tbody>
+    </table>
+    <p class="muted">${esc(venue.disclaimer)}</p>
+  </section>`;
+}
+
+function renderDisputeLifecycleCard(bench, asset) {
+  const life = bench.lifecycle || "open";
+  if (life === "archived") {
+    return `<section class="card">
+      <h2>Archiv</h2>
+      <p>Geschlossen ${esc(formatDate(bench.closed_at))} · Archiviert ${esc(formatDate(bench.archived_at))}${bench.close_outcome ? ` · ${labelOf(bench.close_outcome)}` : ""}.</p>
+      <p class="muted">Nur noch nachschlagen. Justitia/eSchKG bleiben deren Systeme of Record.</p>
+      <form id="dispute-reopen-form" class="stack">
+        <label>Bestrittener Betrag
+          <input name="disputed_amount" type="number" min="0.01" step="0.01" value="${esc(asset.disputed_amount && Number(asset.disputed_amount) > 0 ? asset.disputed_amount : "")}" placeholder="z. B. 10000" />
+        </label>
+        <div class="actions"><button class="btn" type="submit">Wiedereröffnen</button></div>
+      </form>
+    </section>`;
+  }
+  if (life === "closed") {
+    return `<section class="card">
+      <h2>Geschlossen</h2>
+      <p>${badge(bench.close_outcome || "closed")} am ${esc(formatDate(bench.closed_at))}. Forderung steht auf ${badge(asset.status)}.</p>
+      <p class="muted">Schliessen beendet nur die Sponsum-Werkbank. Justitia-Sendungen bleiben dort.</p>
+      <div class="actions">
+        <button class="btn" type="button" id="dispute-archive-btn">Ins Archiv legen</button>
+      </div>
+      <form id="dispute-reopen-form" class="stack">
+        <label>Bestrittener Betrag bei Wiedereröffnung
+          <input name="disputed_amount" type="number" min="0.01" step="0.01" value="${esc(asset.disputed_amount && Number(asset.disputed_amount) > 0 ? asset.disputed_amount : "")}" placeholder="z. B. 10000" />
+        </label>
+        <div class="actions"><button class="btn ghost" type="submit">Wiedereröffnen</button></div>
+      </form>
+    </section>`;
+  }
+  return `<section class="card">
+    <h2>Fall schliessen</h2>
+    <p class="muted">Stufe «Verglichen» allein schliesst den Fall nicht. Abschluss mit Bestätigung. Danach kann archiviert werden.</p>
+    <form id="dispute-close-form" class="stack">
+      <div class="grid-2">
+        <label>Ausgang
+          <select name="outcome" required>
+            <option value="settled">Einigung / verglichen</option>
+            <option value="withdrawn">Zurückgezogen</option>
+          </select>
+        </label>
+        <label>Forderung danach
+          <select name="asset_action">
+            <option value="restore">Wieder freigeben (ACCEPTED, bestritten = 0)</option>
+            <option value="keep">Status belassen (weiter bestritten)</option>
+            <option value="close_asset">Forderung schliessen (CLOSED)</option>
+          </select>
+        </label>
+      </div>
+      <label class="check"><input type="checkbox" name="confirm" required /> Ich schliesse den Streitfall ausdrücklich.</label>
+      <div class="actions"><button class="btn" type="submit">Streitfall schliessen</button></div>
+    </form>
+  </section>`;
+}
+
+function bindDisputeLifecycle(receivableId) {
+  const closeForm = document.getElementById("dispute-close-form");
+  if (closeForm) {
+    closeForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(closeForm).entries());
+      act(
+        () =>
+          api(`/disputes/${encodeURIComponent(receivableId)}/close`, {
+            method: "POST",
+            body: JSON.stringify({
+              confirm: data.confirm === "on",
+              outcome: data.outcome,
+              asset_action: data.asset_action
+            })
+          }),
+        "Streitfall schliessen? Das beendet die Sponsum-Werkbank, nicht automatisch Justitia."
+      );
+    });
+  }
+  const archiveBtn = document.getElementById("dispute-archive-btn");
+  if (archiveBtn) {
+    archiveBtn.addEventListener("click", () => {
+      act(
+        () =>
+          api(`/disputes/${encodeURIComponent(receivableId)}/archive`, {
+            method: "POST",
+            body: JSON.stringify({ confirm: true })
+          }),
+        "In das Archiv legen? Der Fall bleibt nachschlagbar."
+      );
+    });
+  }
+  const reopenForm = document.getElementById("dispute-reopen-form");
+  if (reopenForm) {
+    reopenForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(reopenForm).entries());
+      act(
+        () =>
+          api(`/disputes/${encodeURIComponent(receivableId)}/reopen`, {
+            method: "POST",
+            body: JSON.stringify({ disputed_amount: data.disputed_amount || undefined })
+          }),
+        "Streitfall wiedereröffnen? Die Forderung gilt erneut als bestritten."
+      );
+    });
+  }
+}
+
+function bindVenueCard(receivableId, bench) {
+  const host = document.getElementById("venue-card-host");
+  if (!host) return;
+  const familyEl = document.getElementById("venue-family");
+  const fromEl = document.getElementById("venue-from");
+  const btn = document.getElementById("venue-btn");
+  const form = document.getElementById("venue-form");
+  const status = document.getElementById("venue-status");
+
+  async function assess(persist) {
+    const family = familyEl?.value || "";
+    const from = fromEl?.value || "";
+    if (status) status.textContent = persist ? "Speichere und ermittle…" : "Ermittle Gerichtsstand und Fristen…";
+    try {
+      if (persist) {
+        await api(`/disputes/${encodeURIComponent(receivableId)}/track`, {
+          method: "POST",
+          body: JSON.stringify({ procedure_family: family || null, deadline_start: from || null })
+        });
+      }
+      const query = new URLSearchParams();
+      if (family) query.set("family", family);
+      if (from) query.set("from", from);
+      const venue = await api(`/disputes/${encodeURIComponent(receivableId)}/venue?${query.toString()}`);
+      const nextBench = { ...bench, procedure_family: family || null, deadline_start: from || null };
+      host.innerHTML = renderVenueCard(venue, nextBench);
+      bindVenueCard(receivableId, nextBench);
+      const nextStatus = document.getElementById("venue-status");
+      if (nextStatus) nextStatus.textContent = persist ? "Gespeichert. Ohne Schreiben ermittelt." : "Aktualisiert. Ohne Schreiben ermittelt.";
+    } catch (error) {
+      if (status) status.textContent = error.message || "Ermittlung fehlgeschlagen.";
+    }
+  }
+
+  if (btn) {
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      void assess(true);
+    });
+  }
+  if (form) {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void assess(true);
+    });
+  }
+  if (familyEl) {
+    familyEl.addEventListener("change", () => {
+      void assess(false);
+    });
+  }
+}
+
+function monitionLabel(kind) {
+  return {
+    none: "Keine Rüge",
+    nichterfuellung: "Nichterfüllung",
+    schlechterfuellung: "Schlechterfüllung",
+    beides: "Nicht- und Schlechterfüllung",
+    sonstige: "Sonstige Rüge"
+  }[kind] || kind || "—";
+}
+
+function renderFulfilmentCard(box) {
+  if (!box) {
+    return `<section class="card">
+      <h2>Fulfillment Box</h2>
+      <p class="muted">Keine Fulfillment Box zur Rechnung gefunden. Die Gegenpartei kann Nicht- und Schlechterfüllung dort rügen.</p>
+      <p><a class="btn ghost" href="https://suite.movena.ch/growth/#/deals">In Growth öffnen</a></p>
+    </section>`;
+  }
+  const m = box.monition || {};
+  const kind = m.kind || "none";
+  return `<section class="card">
+    <h2>Fulfillment Box</h2>
+    <p>Fall ${esc(box.id)} · ${badge(box.status)} · Gate ${esc(box.billing_gate || "—")} · Checkliste ${box.progress?.done || 0}/${box.progress?.required || 0}</p>
+    <p><strong>${esc(monitionLabel(kind))}</strong>${
+      (m.labels || []).length ? ` · ${esc(m.labels.join(", "))}` : ""
+    }</p>
+    ${m.comment ? `<p>${esc(m.comment)}</p>` : "<p class='muted'>Die Gegenpartei hat noch keine Nicht- oder Schlechterfüllung moniert.</p>"}
+    <p class="muted">${esc(box.customer || "")}${box.sales_order_id ? ` · Auftrag ${esc(box.sales_order_id)}` : ""} · ${esc(box.profile || "")}</p>
+    <div class="actions"><a class="btn" href="${esc(box.desk_url)}">Box in Growth öffnen</a></div>
+  </section>`;
 }
 
 function disputeHref(row) {
@@ -459,7 +749,13 @@ async function toggleSettlementRow(row, forceOpen) {
 }
 
 async function act(run, confirmText) {
-  if (busy) return;
+  if (busy) {
+    lastError = "Bitte warten — eine Aktion läuft noch.";
+    const alert = document.querySelector("[role='alert'], .error");
+    if (alert) alert.textContent = lastError;
+    else window.alert(lastError);
+    return;
+  }
   if (confirmText && !window.confirm(confirmText)) return;
   busy = true;
   lastError = "";
@@ -479,7 +775,7 @@ function renderHub() {
   const k = workspace.kpis;
   main.innerHTML = `
     <h1>Sponsum</h1>
-    <p class="lead">Forderung entsteht im ERP, wird verifiziert, bilateral finanziert, übertragen und durchgesetzt. Sponsum hält keine Kundengelder.</p>
+    <p class="lead">Einstieg ist die <strong>Forderung aus der Rechnung</strong> — nicht der Wechsel. Verifizieren, finanzieren, zedieren. Sponsum hält keine Kundengelder.</p>
     <div class="kpis">
       <div class="kpi"><strong>${k.receivables}</strong><span>Forderungen</span></div>
       <div class="kpi"><strong>${k.live_offers}</strong><span>Offene Angebote</span></div>
@@ -491,11 +787,11 @@ function renderHub() {
     <div class="grid-2">
       <section class="card">
         <h2>Nächste Schritte</h2>
-        <p>Forderung anlegen, prüfen, finanzieren oder zedieren, Zahlung über den Provider bestätigen und bei Bedarf durchsetzen.</p>
+        <p>Zuerst die Forderung aus der Rechnung. Wechsel nur als Sonderfall.</p>
         <div class="actions">
-          <a class="btn" href="#/receivables">Forderungen</a>
-          <a class="btn ghost" href="#/capital">Kapital suchen</a>
-          <a class="btn ghost" href="#/market">Marktplatz</a>
+          <a class="btn" href="#/receivables">Forderung anlegen</a>
+          <a class="btn ghost" href="#/zession">Zedieren</a>
+          <a class="btn ghost" href="https://suite.movena.ch/growth/#/finance/debtors">← Debitoren 360</a>
           <a class="btn ghost" href="#/settlement">Abrechnung</a>
         </div>
       </section>
@@ -541,7 +837,14 @@ function renderAssetTable(rows, title, total) {
     </section>`;
 }
 
+function hashQuery() {
+  const raw = String(location.hash || "");
+  const q = raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "";
+  return new URLSearchParams(q);
+}
+
 function renderReceivables() {
+  const invoicePrefill = hashQuery().get("invoice") || "";
   main.innerHTML = `
     <h1>Forderungen</h1>
     <p class="lead">Die Rechnung ist nicht das Finanzierungsobjekt. Das Asset trägt Vertrag, Nachweis, Sperre und Register.</p>
@@ -555,7 +858,7 @@ function renderReceivables() {
       <section class="card">
         <h2>Neue Forderung aus Rechnung</h2>
         <form class="stack" id="create-form">
-          <label>Rechnungsnummer <input name="invoice_id" required placeholder="z. B. RE-10482" /></label>
+          <label>Rechnungsnummer <input name="invoice_id" required placeholder="z. B. RE-10482" value="${esc(invoicePrefill)}" /></label>
           <label>Nominal <input name="nominal_amount" inputmode="decimal" required placeholder="0.00" /></label>
           <label>Schuldner <select name="debtor_party_id" required>${partyOptions("", { companies: false })}</select></label>
           ${stammdatenHint()}
@@ -750,7 +1053,21 @@ async function renderDossier(id) {
   const sell = document.getElementById("act-sell");
   if (sell) sell.addEventListener("click", () => act(() => api(`/receivables/${id}/offers`, { method: "POST", body: JSON.stringify({ seller_party_id: SELLER, min_price: String(Number(asset.nominal_amount) * 0.97) }) }), "Forderung am Markt anbieten? Sie kann nicht parallel erneut angeboten werden."));
   const dispute = document.getElementById("act-dispute");
-  if (dispute) dispute.addEventListener("click", () => act(() => api(`/receivables/${id}/disputes`, { method: "POST", body: JSON.stringify({ disputed_amount: "10000", resolve_case_id: `resolve-${asset.invoice_id}` }) }), "Streitfall eröffnen? Ein unbelasteter Verkauf ist danach nicht möglich."));
+  if (dispute) {
+    dispute.addEventListener("click", () => {
+      const suggested = Number(asset.disputed_amount) > 0 ? asset.disputed_amount : "";
+      const typed = window.prompt("Bestrittener Betrag in CHF", suggested || String(Math.round(Number(asset.nominal_amount) * 0.2) || "10000"));
+      if (typed == null || !String(typed).trim()) return;
+      act(
+        () =>
+          api(`/receivables/${id}/disputes`, {
+            method: "POST",
+            body: JSON.stringify({ disputed_amount: String(typed).trim(), resolve_case_id: `resolve-${asset.invoice_id}` })
+          }),
+        "Streitfall eröffnen? Ein unbelasteter Verkauf ist danach nicht möglich."
+      );
+    });
+  }
   const accept = document.getElementById("act-accept");
   if (accept) {
     accept.addEventListener("click", () => {
@@ -1766,37 +2083,113 @@ function renderSettlement() {
   });
 }
 
+function disputeListView() {
+  const query = new URLSearchParams(window.location.hash.split("?")[1] || "");
+  const view = query.get("view");
+  return view === "closed" || view === "archived" || view === "all" ? view : "open";
+}
+
 function renderDisputes() {
+  const all = workspace.disputes || [];
+  const view = disputeListView();
+  const rows = view === "all" ? all : all.filter((row) => (row.lifecycle || "open") === view);
+  const open = all.filter((row) => (row.lifecycle || "open") === "open");
+  const closed = all.filter((row) => row.lifecycle === "closed");
+  const archived = all.filter((row) => row.lifecycle === "archived");
+  const court = open.filter((row) => row.court_stage && row.court_stage !== "idle");
+  const candidates = workspace.dispute_candidates || [];
+  const tab = (id, label, count) =>
+    `<a href="#/disputes?view=${id}" class="${view === id ? "is-on" : ""}">${label} (${count})</a>`;
   main.innerHTML = `
-    <h1>Dispute · Movena Resolve</h1>
-    <p class="lead">Teilbeanstandung bleibt sichtbar: Nominal, akzeptiert, bestritten. Danach Verhandlung, Mediation oder Durchsetzung.</p>
+    <h1>Dispute</h1>
+    <p class="lead">Zwei Spuren, ein Dossier: aussergerichtlich (Verhandlung, Mediation, Resolve) und staatlich (eSchKG, Justitia). Keine parallele Gerichtsakte.</p>
+    ${errorLine()}
+    <div class="kpis">
+      <div class="kpi"><strong>${open.length}</strong><span>Offene Streitfälle</span></div>
+      <div class="kpi"><strong>${court.length}</strong><span>Staatlich erfasst</span></div>
+      <div class="kpi"><strong>${closed.length}</strong><span>Geschlossen</span></div>
+      <div class="kpi"><strong>${archived.length}</strong><span>Archiv</span></div>
+    </div>
+    <nav class="tabs" aria-label="Dispute-Status">
+      ${tab("open", "Offen", open.length)}
+      ${tab("closed", "Geschlossen", closed.length)}
+      ${tab("archived", "Archiv", archived.length)}
+      ${tab("all", "Alle", all.length)}
+    </nav>
+    <section class="card">
+      <h2>Neuen Streitfall eröffnen</h2>
+      <p class="muted">Startet am Asset. Danach kein unbelasteter Verkauf, bis der Fall geschlossen und die Forderung wieder freigegeben ist.</p>
+      <form id="dispute-open-form" class="stack">
+        <label>Forderung
+          <select name="receivable_id" required>
+            <option value="">Bitte wählen</option>
+            ${candidates
+              .map(
+                (row) =>
+                  `<option value="${esc(row.receivable_id)}">${esc(row.invoice_id)} · ${esc(row.receivable_id)} · ${formatChf(row.nominal_amount, row.currency)} · ${labelOf(row.status)}</option>`
+              )
+              .join("")}
+          </select>
+        </label>
+        <div class="grid-2">
+          <label>Bestrittener Betrag (CHF)
+            <input name="disputed_amount" type="number" min="0.01" step="0.01" required placeholder="z. B. 10000" />
+          </label>
+          <label>Resolve-Fall (optional)
+            <input name="resolve_case_id" placeholder="resolve-…" />
+          </label>
+        </div>
+        <div class="actions"><button class="btn" type="submit">Streitfall eröffnen</button></div>
+      </form>
+      ${candidates.length ? "" : `<p class="muted">Keine geeignete offene Forderung. Zuerst unter Forderungen eine akzeptierte Rechnung anlegen.</p>`}
+    </section>
     <section class="card">
       <table>
-        <thead><tr><th>Fall</th><th>Rechnung</th><th>Status</th><th class="num">Nominal</th><th class="num">Akzeptiert</th><th class="num">Bestritten</th><th>Inhaber</th></tr></thead>
+        <thead><tr><th>Fall</th><th>Rechnung</th><th>Asset</th><th>Fallstatus</th><th>Aussergerichtlich</th><th>Staatlich</th><th class="num">Bestritten</th><th>Inhaber</th></tr></thead>
         <tbody>
           ${
-            workspace.disputes.length
-              ? workspace.disputes
+            rows.length
+              ? rows
                   .map((row) => {
                     const href = disputeHref(row);
                     return `<tr class="clickable" data-href="${href}">
-                <td><a href="${href}">${row.resolve_case_id || row.dispute_id}</a></td>
-                <td><a href="#/receivables/${row.receivable_id}">${row.invoice_id}</a></td>
+                <td><a href="${href}">${esc(row.resolve_case_id || row.dispute_id)}</a></td>
+                <td><a href="#/receivables/${row.receivable_id}">${esc(row.invoice_id)}</a></td>
                 <td>${badge(row.status)}</td>
-                <td class="num">${formatChf(row.nominal_amount)}</td>
-                <td class="num">${formatChf(row.accepted_amount)}</td>
+                <td>${badge(row.lifecycle || "open")}</td>
+                <td>${badge(row.ooc_stage || "negotiation")}</td>
+                <td>${badge(row.court_stage || "idle")}</td>
                 <td class="num">${formatChf(row.disputed_amount)}</td>
                 <td>${esc(partyLabel(row.current_holder_party_id))}</td>
               </tr>`;
                   })
                   .join("")
-              : emptyRow(7, "Keine Streitfälle.")
+              : emptyRow(8, view === "open" ? "Keine offenen Streitfälle." : "Keine Einträge in dieser Ansicht.")
           }
         </tbody>
       </table>
     </section>
   `;
   bindClickableRows();
+  const openForm = document.getElementById("dispute-open-form");
+  if (openForm) {
+    openForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(openForm).entries());
+      act(async () => {
+        const created = await api("/disputes", {
+          method: "POST",
+          body: JSON.stringify({
+            receivable_id: data.receivable_id,
+            disputed_amount: data.disputed_amount,
+            resolve_case_id: data.resolve_case_id || undefined
+          })
+        });
+        const id = created.dispute?.dispute_id || created.asset?.receivable_id || data.receivable_id;
+        window.location.hash = `#/disputes/${encodeURIComponent(id)}`;
+      }, "Streitfall eröffnen? Ein unbelasteter Verkauf ist danach nicht möglich.");
+    });
+  }
 }
 
 async function renderDisputeDossier(id) {
@@ -1809,36 +2202,155 @@ async function renderDisputeDossier(id) {
   }
   const dispute = pack.dispute;
   const asset = pack.asset;
+  const bench = pack.workbench || {};
+  const justitia = pack.justitia || dispute.justitia || {};
+  const templates = pack.templates || [];
+  const forms = bench.forms || [];
+  const exports = bench.exports || [];
   main.innerHTML = `
     <p class="muted"><a href="#/disputes">← Dispute</a> · <a href="#/receivables/${asset.receivable_id}">Forderung</a></p>
     <h1>${esc(dispute.resolve_case_id || dispute.dispute_id)}</h1>
-    <p class="lead">Rechnung ${esc(asset.invoice_id)} · ${formatChf(asset.nominal_amount, asset.currency)} · ${badge(asset.status)}</p>
+    <p class="lead">Rechnung ${esc(asset.invoice_id)} · ${formatChf(asset.nominal_amount, asset.currency)} · ${badge(asset.status)} · Fall ${badge(bench.lifecycle || "open")}. Inhaber ${esc(partyLabel(asset.current_holder_party_id))} (Holder gewinnt).</p>
     ${errorLine()}
     <div class="kpis">
       <div class="kpi"><strong>${formatChf(asset.nominal_amount, asset.currency)}</strong><span>Nominal</span></div>
       <div class="kpi"><strong>${formatChf(asset.accepted_amount, asset.currency)}</strong><span>Akzeptiert</span></div>
       <div class="kpi"><strong>${formatChf(asset.disputed_amount, asset.currency)}</strong><span>Bestritten</span></div>
-      <div class="kpi"><strong>${esc(partyLabel(asset.current_holder_party_id))}</strong><span>Inhaber</span></div>
+      <div class="kpi"><strong>${badge(bench.ooc_stage)}</strong><span>Aussergerichtlich</span></div>
+      <div class="kpi"><strong>${badge(bench.court_stage)}</strong><span>Staatlich</span></div>
     </div>
     <div class="grid-2">
       <section class="card">
-        <h2>Fall</h2>
-        <p>Schuldner ${esc(partyLabel(asset.debtor_party_id))}<br>
-        Gläubiger / Inhaber ${esc(partyLabel(asset.current_holder_party_id))}<br>
-        Instrument ${labelOf(asset.instrument_type)} · Risiko ${asset.risk_class}</p>
-        <p>Resolve bleibt getrennt vom Risk Score. Ein unbelasteter Verkauf ist gesperrt, solange der Streit offen ist.</p>
+        <h2>Aussergerichtlich</h2>
+        <p class="muted">Verhandlung, Mediation, Movena Resolve. Sperrt einen unbelasteten Verkauf.</p>
+        <form id="ooc-form" class="stack">
+          <label>Stufe
+            <select name="ooc_stage">
+              ${["negotiation", "mediation", "resolve", "settled", "withdrawn"]
+                .map((stage) => `<option value="${stage}" ${bench.ooc_stage === stage ? "selected" : ""}>${labelOf(stage)}</option>`)
+                .join("")}
+            </select>
+          </label>
+          <div class="actions"><button class="btn" type="submit">Stufe speichern</button></div>
+        </form>
       </section>
       <section class="card">
-        <h2>Nächste Schritte</h2>
-        <p>Verhandlung → Mediation → Movena Resolve → eSchKG / Justitia.Swiss.</p>
-        <div class="actions">
-          <a class="btn" href="#/receivables/${asset.receivable_id}">Forderungsdossier</a>
-          ${(pack.wechsel_drafts || [])
-            .map((row) => `<a class="btn ghost" href="#/wechsel/${row.instrument_id}">Wechsel ${row.instrument_id}</a>`)
-            .join("")}
-        </div>
+        <h2>Staatlich · Justitia / eSchKG</h2>
+        <p class="muted">Justitia bleibt Sendungs-SoR. Die Suite orchestriert nur. Kein Auto-Receive, kein PROD-Submit.</p>
+        <form id="court-form" class="stack">
+          <label>Stufe
+            <select name="court_stage">
+              ${["idle", "eschkg", "justitia_inbox", "justitia_filed"]
+                .map((stage) => `<option value="${stage}" ${bench.court_stage === stage ? "selected" : ""}>${labelOf(stage)}</option>`)
+                .join("")}
+            </select>
+          </label>
+          <label>eSchKG-Fall
+            <input name="eschkg_case_id" value="${esc(bench.eschkg_case_id || "")}" placeholder="ESCHK-…" />
+          </label>
+          <div class="actions">
+            <button class="btn" type="submit">Staatlich speichern</button>
+            <a class="btn ghost" href="${esc(justitia.inbox_url || "/justitia/")}">Justitia-Postfach</a>
+            <a class="btn ghost" href="${esc(justitia.compose_url || "/justitia/")}">Eingabe vorbereiten</a>
+          </div>
+        </form>
       </section>
     </div>
+    ${renderDisputeLifecycleCard(bench, asset)}
+    <div id="venue-card-host">${renderVenueCard(pack.venue, bench)}</div>
+    ${renderFulfilmentCard(pack.fulfilment)}
+    <section class="card">
+      <h2>Stammdaten und Verknüpfungen</h2>
+      <p class="muted">Diese Sätze fliessen in den Formulargenerator. Inhaber gewinnt gegen Origin-Gläubiger.</p>
+      <p><strong>Schuldnerin</strong> ${esc(partyLabel(asset.debtor_party_id))}<br>
+      <strong>Inhaberin</strong> ${esc(partyLabel(asset.current_holder_party_id))}<br>
+      <strong>Origin-Gläubigerin</strong> ${esc(partyLabel(asset.creditor_party_id))}</p>
+      <div class="links">${(bench.links || []).map((link) => `<span class="chip">${esc(link.doctype)}: ${esc(link.label)}</span>`).join("") || "<span class='muted'>Noch keine zusätzlichen Verknüpfungen</span>"}</div>
+      <form id="link-form" class="stack" action="#" method="post">
+        <label>Datensatz verknüpfen
+          <select name="packed" id="link-packed">
+            ${(pack.catalog || [])
+              .map((item) => `<option value="${esc(item.doctype)}::${esc(item.name)}::${esc(item.label)}">${esc(item.doctype)} · ${esc(item.label)}</option>`)
+              .join("")}
+          </select>
+        </label>
+        <div class="actions"><button class="btn ghost" id="link-btn" type="button">Verknüpfen</button></div>
+      </form>
+    </section>
+    <div class="grid-2">
+      <section class="card">
+        <h2>Formulargenerator</h2>
+        <p class="muted">Entwürfe für Rechtsschriften und Repliken. Gerichtsstand und Fristen stehen oben unabhängig vom Schreiben. ${
+          pack.form_ai?.enabled
+            ? `OpenAI (${esc(pack.form_ai.model)}) aus den Suite-OCR-Settings. Kein Rechtsrat.`
+            : "OpenAI ist nicht konfiguriert — es bleibt der Vorlagentext. Kein Rechtsrat."
+        }</p>
+        <form id="form-gen" class="stack" action="#" method="post">
+          <label>Vorlage
+            <select name="template_id" id="form-template">
+              ${templates
+                .map((row) => `<option value="${row.id}">${esc(row.title)} · ${row.track === "court" ? "staatlich" : row.track === "out_of_court" ? "aussergerichtlich" : "beide"}</option>`)
+                .join("")}
+            </select>
+          </label>
+          <label>Hinweis an die KI
+            <textarea name="instruction" id="form-instruction" rows="3" placeholder="z. B. Frist 10 Tage, nur unbestrittener Teil"></textarea>
+          </label>
+          <label class="check"><input type="checkbox" name="use_ai" id="form-use-ai" ${pack.form_ai?.enabled ? "checked" : ""} ${pack.form_ai?.enabled ? "" : "disabled"} /> KI-Entwurf über OpenAI</label>
+          <div class="actions">
+            <button class="btn" id="form-gen-btn" type="button">Entwurf erzeugen</button>
+          </div>
+          <p class="muted" id="form-gen-status" role="status"></p>
+        </form>
+        ${
+          forms[0]
+            ? `<div class="note" id="form-preview"><strong>${esc(forms[0].title)}</strong> · ${forms[0].source === "openai" ? "OpenAI" : "Vorlage"}<pre class="form-draft">${esc((forms[0].lines || []).join("\n"))}</pre></div>`
+            : `<p class="muted">Noch keine Entwürfe.</p>`
+        }
+        ${
+          forms.length
+            ? `<ul class="plain-list">${forms
+                .map(
+                  (row) =>
+                    `<li>${esc(row.title)} · ${row.source === "openai" ? "OpenAI" : "Vorlage"} <button type="button" class="linkish" data-form-pdf="${row.id}">PDF</button></li>`
+                )
+                .join("")}</ul>`
+            : ""
+        }
+      </section>
+      <section class="card">
+        <h2>Dossier an Fachperson</h2>
+        <p class="muted">ZIP mit Manifest, Deckblatt und Entwürfen. Keine vollständige Justizakte.</p>
+        <form id="export-form" class="stack">
+          <label>Zu Handen
+            <input name="recipient" required placeholder="Kanzlei / Mediator / Treuhänder" />
+          </label>
+          <label class="check"><input type="checkbox" name="confirm" /> Ich bestätige den Export ausdrücklich.</label>
+          <div class="actions"><button class="btn" type="submit">Briefing exportieren</button></div>
+        </form>
+        ${
+          exports.length
+            ? `<ul class="plain-list">${exports
+                .map(
+                  (row) =>
+                    `<li>${esc(row.recipient)} · ${esc((row.created_at || "").slice(0, 10))} <button type="button" class="linkish" data-export="${row.id}">ZIP</button></li>`
+                )
+                .join("")}</ul>`
+            : ""
+        }
+      </section>
+    </div>
+    <section class="card">
+      <h2>Fallkontext</h2>
+      <p>Schuldner ${esc(partyLabel(asset.debtor_party_id))} · Origin-Gläubiger ${esc(partyLabel(asset.creditor_party_id))} · Inhaber ${esc(partyLabel(asset.current_holder_party_id))}</p>
+      <p class="muted">${esc(bench.notes || "Resolve bleibt getrennt vom Risk Score.")}</p>
+      <div class="actions">
+        <a class="btn ghost" href="#/receivables/${asset.receivable_id}">Forderungsdossier</a>
+        ${(pack.wechsel_drafts || [])
+          .map((row) => `<a class="btn ghost" href="#/wechsel/${row.instrument_id}">Wechsel ${row.instrument_id}</a>`)
+          .join("")}
+      </div>
+    </section>
     ${
       (pack.trades || []).length
         ? `<section class="card"><h2>Abschlüsse</h2>${pack.trades
@@ -1854,6 +2366,143 @@ async function renderDisputeDossier(id) {
       ${eventTable(pack.events)}
     </section>
   `;
+
+  bindDisputeLifecycle(asset.receivable_id);
+  bindVenueCard(asset.receivable_id, bench);
+  void (async () => {
+    try {
+      const query = new URLSearchParams();
+      if (bench.procedure_family) query.set("family", bench.procedure_family);
+      if (bench.deadline_start) query.set("from", bench.deadline_start);
+      const venue = await api(`/disputes/${encodeURIComponent(asset.receivable_id)}/venue?${query.toString()}`);
+      const host = document.getElementById("venue-card-host");
+      if (!host) return;
+      host.innerHTML = renderVenueCard(venue, bench);
+      bindVenueCard(asset.receivable_id, bench);
+      const status = document.getElementById("venue-status");
+      if (status && !status.textContent) status.textContent = "Aus Stammdaten ermittelt. Kein Schreiben nötig.";
+    } catch {
+      /* Dossier-Karte bleibt als Fallback */
+    }
+  })();
+  const ooc = document.getElementById("ooc-form");
+  if (ooc) {
+    ooc.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const stage = new FormData(ooc).get("ooc_stage");
+      act(() => api(`/disputes/${encodeURIComponent(asset.receivable_id)}/track`, { method: "POST", body: JSON.stringify({ ooc_stage: stage }) }));
+    });
+  }
+  const court = document.getElementById("court-form");
+  if (court) {
+    court.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(court).entries());
+      act(() => api(`/disputes/${encodeURIComponent(asset.receivable_id)}/track`, { method: "POST", body: JSON.stringify(data) }));
+    });
+  }
+  const linkBtn = document.getElementById("link-btn");
+  if (linkBtn) {
+    linkBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      const packed = String(document.getElementById("link-packed")?.value || "");
+      const [doctype, name, label] = packed.split("::");
+      if (!doctype || !name) return;
+      act(() =>
+        api(`/disputes/${encodeURIComponent(asset.receivable_id)}/links`, {
+          method: "POST",
+          body: JSON.stringify({ links: [{ doctype, name, label: label || name }] })
+        })
+      );
+    });
+  }
+  const formGen = document.getElementById("form-gen");
+  const formBtn = document.getElementById("form-gen-btn");
+  const formStatus = document.getElementById("form-gen-status");
+  async function createFormDraft() {
+    if (busy) {
+      if (formStatus) formStatus.textContent = "Bitte warten — ein Entwurf wird bereits erzeugt.";
+      return;
+    }
+    const templateId = document.getElementById("form-template")?.value;
+    if (!templateId) {
+      lastError = "Bitte eine Vorlage wählen.";
+      if (formStatus) formStatus.textContent = lastError;
+      return;
+    }
+    const instruction = document.getElementById("form-instruction")?.value || "";
+    const useAi = Boolean(document.getElementById("form-use-ai")?.checked);
+    if (formBtn) formBtn.disabled = true;
+    if (formStatus) formStatus.textContent = useAi ? "OpenAI schreibt den Entwurf…" : "Vorlage wird erzeugt…";
+    await act(async () => {
+      const created = await api(`/disputes/${encodeURIComponent(asset.receivable_id)}/forms`, {
+        method: "POST",
+        body: JSON.stringify({
+          template_id: templateId,
+          instruction: instruction || undefined,
+          use_ai: useAi
+        })
+      });
+      if (created.warning) lastError = created.warning;
+    });
+    if (formBtn) formBtn.disabled = false;
+    if (formStatus && !lastError) formStatus.textContent = "Entwurf gespeichert.";
+  }
+  if (formGen) {
+    formGen.addEventListener("submit", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void createFormDraft();
+    });
+  }
+  if (formBtn) {
+    formBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void createFormDraft();
+    });
+  }
+  const exportForm = document.getElementById("export-form");
+  if (exportForm) {
+    exportForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(exportForm);
+      try {
+        const created = await api(`/disputes/${encodeURIComponent(asset.receivable_id)}/exports`, {
+          method: "POST",
+          body: JSON.stringify({ recipient: data.get("recipient"), confirm: data.get("confirm") === "on" })
+        });
+        await downloadPath(created.download.replace("/api/sponsum/v1", ""), created.export.filename);
+        workspace = await loadWorkspace();
+        await route();
+      } catch (error) {
+        lastError = error.message;
+        await route();
+      }
+    });
+  }
+  main.querySelectorAll("[data-form-pdf]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const formId = button.getAttribute("data-form-pdf");
+      downloadPath(`/disputes/${encodeURIComponent(asset.receivable_id)}/forms/${formId}/pdf`, `${formId}.pdf`).catch(
+        (error) => {
+          lastError = error.message;
+          route();
+        }
+      );
+    });
+  });
+  main.querySelectorAll("[data-export]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const exportId = button.getAttribute("data-export");
+      downloadPath(`/disputes/${encodeURIComponent(asset.receivable_id)}/exports/${exportId}`, `briefing-${exportId}.zip`).catch(
+        (error) => {
+          lastError = error.message;
+          route();
+        }
+      );
+    });
+  });
 }
 
 async function renderSettlementDossier(id) {
