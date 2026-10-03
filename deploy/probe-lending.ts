@@ -7,7 +7,7 @@
  * Until the loan product exists (O1) it probes with a placeholder product name: only reads happen, nothing is created.
  * Prints results only, never credentials.
  */
-import { createHttpLendingTransport, lendingConfigFromEnv, listLendingCustomers, readLendingStatus } from "../apps/api/src/modules/sponsum/lending-bridge.js";
+import { createHttpLendingTransport, lendingConfigFromEnv, listLendingCustomers, listLombardSecurities, readLendingStatus, readLombardStatus } from "../apps/api/src/modules/sponsum/lending-bridge.js";
 
 const productSet = Boolean((process.env.MOVENA_LENDING_LOAN_PRODUCT ?? "").trim());
 const config = lendingConfigFromEnv({ ...process.env, MOVENA_LENDING_LOAN_PRODUCT: process.env.MOVENA_LENDING_LOAN_PRODUCT || "__probe__" });
@@ -32,6 +32,13 @@ async function main() {
   await check("status for an unknown receivable", async () => String(await readLendingStatus("SPN-PROBE-NONE", deps)));
   await check("customer lookup", async () => ((await transport.get("Customer", "__probe-does-not-exist__")) === null ? "404 -> null" : "unexpected hit"));
   await check("ERPNext customers selectable as borrowers", async () => `${(await listLendingCustomers(deps)).length} active customer(s)`);
+  await check("Lombard product configured (O12)", async () => config.lombardProduct ? config.lombardProduct : "not yet: MOVENA_LENDING_LOMBARD_PRODUCT missing");
+  await check("Lombard securities with a valid price", async () => {
+    const rows = await listLombardSecurities(deps);
+    const priced = rows.filter((row) => row.price !== null);
+    return `${rows.length} securities, ${priced.length} priced` + (priced.length ? ` (e.g. ${priced[0].code} CHF ${priced[0].price})` : "");
+  });
+  await check("Lombard status for an unknown request", async () => String(await readLombardStatus("lom-probe-none", deps)));
   await check("company exists", async () => {
     const rows = await transport.list("Loan Application", [["company", "=", config.company]], ["name"], 1);
     return `${config.company}, ${rows.length} application(s)`;

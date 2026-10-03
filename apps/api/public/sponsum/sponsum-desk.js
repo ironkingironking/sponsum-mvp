@@ -79,6 +79,7 @@ const STATUS_LABELS = {
   EQUITY: "Eigenkapital",
   SHORT_DEBT: "Kurzfristiges FK",
   LONG_DEBT: "Langfristiges FK",
+  LOMBARD: "Lombardkredit",
   INVESTOR: "Investor",
   LENDER: "Gläubiger",
   FAMILY_OFFICE: "Family Office",
@@ -308,6 +309,7 @@ function navKey() {
   if (hash.startsWith("#/settlement/")) return "settlement";
   if (hash.startsWith("#/zession/")) return "zession";
   if (hash.startsWith("#/capital/")) return "capital";
+  if (hash.startsWith("#/lombard/")) return "lombard";
   if (hash.startsWith("#/accounting/")) return "accounting";
   if (hash.startsWith("#/identity/")) return "identity";
   return hash.replace("#/", "").split("/")[0] || "hub";
@@ -343,6 +345,8 @@ async function route() {
     if (capitalNeed) return renderCapitalNeedDossier(decodeURIComponent(capitalNeed[1]));
     const capitalProvider = hash.match(/^#\/capital\/provider\/([^/?]+)/);
     if (capitalProvider) return renderCapitalProviderDossier(decodeURIComponent(capitalProvider[1]));
+    const lombard = hash.match(/^#\/lombard\/([^/?]+)/);
+    if (lombard) return renderLombardDossier(decodeURIComponent(lombard[1]));
     const accounting = hash.match(/^#\/accounting\/([^/?]+)/);
     if (accounting) return renderAccountingDossier(decodeURIComponent(accounting[1]));
     const identity = hash.match(/^#\/identity\/([^/?]+)/);
@@ -355,6 +359,7 @@ async function route() {
       zession: renderZession,
       wechsel: renderWechsel,
       capital: renderCapital,
+      lombard: renderLombard,
       market: renderMarket,
       portfolio: renderPortfolio,
       settlement: renderSettlement,
@@ -2878,6 +2883,9 @@ async function renderCapitalNeedDossier(id) {
 // need, triggers one draft application and shows Lending's status as it is (docs/lending.md).
 function lendingCard(need, pack) {
   const note = `<p class="muted">Frappe Lending führt den Kreditvertrag: Zins, Tilgungsplan und Buchung. Sponsum zeigt nur Status und Verweis.</p>`;
+  if (need.kind === "LOMBARD") {
+    return `<section class="card"><h2>Frappe Lending</h2>${note}<p>Lombardkredit · <a href="#/lombard/${esc(need.need_id)}">Sicherheiten und Stand</a></p></section>`;
+  }
   if (need.kind === "EQUITY") {
     return `<section class="card"><h2>Frappe Lending</h2><p class="muted">Eigenkapital läuft nicht über Frappe Lending.</p></section>`;
   }
@@ -2955,6 +2963,7 @@ function bindLendingCard(need) {
       );
     });
   }
+  if (need.kind === "LOMBARD") return;
   const request = document.getElementById("lending-request");
   if (request) {
     request.addEventListener("click", () =>
@@ -2979,6 +2988,223 @@ function bindLendingCard(need) {
         target.textContent = `Status aus Frappe Lending nicht verfügbar: ${error.message}`;
       });
   }
+}
+
+// Lombard credit (O12): Frappe Lending holds credit, securities, prices, pledges and shortfall. Sponsum takes the
+// request (tenant admins of the lending tenant) and shows Lending's values with source and deep link.
+function lombardQty(value) {
+  const n = Number(String(value ?? "").replace(/'/g, "").replace(",", "."));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+async function renderLombard() {
+  let data;
+  try {
+    data = await api("/lombard");
+  } catch (error) {
+    main.innerHTML = `<section class="card"><h1>Lombardkredit</h1><p class="muted">${esc(error.message)}</p></section>`;
+    return;
+  }
+  const securities = data.securities || [];
+  const priced = securities.filter((row) => row.price !== null);
+  const customers = workspace.lendingCustomers || [];
+  const requests = (data.requests || []).slice().reverse();
+  const canRequest = data.configured && customers.length && priced.length;
+  const securityOptions = priced
+    .map((row) => `<option value="${esc(row.code)}">${esc(row.name)} (${esc(row.type)}, ${formatChf(row.price)})</option>`)
+    .join("");
+  main.innerHTML = `
+    <h1>Lombardkredit</h1>
+    <p class="lead">Kredit gegen verpfändete Werte. Frappe Lending führt Kredit, Sicherheiten, Kurse und Nachschuss; Sponsum erfasst den Antrag und zeigt den Stand. Verwahrung per Multisig-Treuhand — Sponsum hält keine Werte und keine Schlüssel.</p>
+    ${errorLine()}
+    ${data.configured ? "" : `<p class="note">${esc(data.message || "Lombardkredite sind nicht eingerichtet.")}</p>`}
+    <div class="grid-2">
+      <section class="card">
+        <h2>Sicherheiten in Lending</h2>
+        <table>
+          <thead><tr><th>Sicherheit</th><th>Typ</th><th>Kurs</th><th>Beleihung</th></tr></thead>
+          <tbody>
+            ${
+              securities.length
+                ? securities
+                    .map(
+                      (row) => `<tr>
+                        <td>${esc(row.name)}<br><span class="muted mono">${esc(row.code)}</span></td>
+                        <td>${esc(row.type)}</td>
+                        <td>${row.price === null ? `<span class="muted">kein Kurs</span>` : `${formatChf(row.price)}<br><span class="muted">bis ${formatDate(row.price_valid_upto)}</span>`}</td>
+                        <td>${esc(row.loan_to_value_ratio)} %<br><span class="muted">Abschlag ${esc(row.haircut)} %</span></td>
+                      </tr>`
+                    )
+                    .join("")
+                : emptyRow(4, "Keine Sicherheiten in Lending.")
+            }
+          </tbody>
+        </table>
+        <p class="muted">Quelle LENDING · Loan Security / Loan Security Price. Kurse täglich; ohne gültigen Kurs ist eine Sicherheit nicht belehnbar.</p>
+      </section>
+      <section class="card">
+        <h2>Antrag</h2>
+        ${
+          canRequest
+            ? `<form id="lombard-form" class="stack">
+                <label>Kunde <select name="customer_id" required><option value="">wählen…</option>${lendingCustomerOptgroup("")}</select></label>
+                <label>Kreditbetrag CHF <input name="amount" inputmode="decimal" required placeholder="0.00" /></label>
+                ${[0, 1, 2]
+                  .map(
+                    (i) => `<div class="actions">
+                      <label>Sicherheit <select name="sec${i}"><option value="">—</option>${securityOptions}</select></label>
+                      <label>Menge <input name="qty${i}" inputmode="decimal" placeholder="0" /></label>
+                    </div>`
+                  )
+                  .join("")}
+                <label>Verwahrung <input name="custody_ref" required placeholder="Multisig-Adresse, -Descriptor (xpub) oder Depot-Nr." /></label>
+                <p class="muted">Nur öffentliche Angaben — nie private Schlüssel oder Seed-Phrasen.</p>
+                <p id="lombard-value" class="muted">Belehnungswert nach Abschlag: ${formatChf(0)}</p>
+                <button type="submit">Lombardkredit in Lending beantragen</button>
+              </form>`
+            : `<p class="muted">${
+                !data.configured
+                  ? "Erst nach Einrichtung möglich."
+                  : !customers.length
+                    ? "Keine Kunden aus ERPNext verfügbar (nur für die Mandantenadministration)."
+                    : "Keine Sicherheit mit gültigem Kurs."
+              }</p>`
+        }
+      </section>
+    </div>
+    <section class="card">
+      <h2>Anträge</h2>
+      <table>
+        <thead><tr><th>Datum</th><th>Kunde</th><th>Betrag</th><th>Sicherheiten</th><th></th></tr></thead>
+        <tbody>
+          ${
+            requests.length
+              ? requests
+                  .map(
+                    (need) => `<tr class="clickable" data-href="#/lombard/${esc(need.need_id)}">
+                      <td>${formatDate(need.created_at)}</td>
+                      <td>${esc(partyLabel(need.seeker_party_id))}</td>
+                      <td>${formatChf(need.amount)}</td>
+                      <td>${(need.collateral || []).map((row) => `${esc(row.qty)} ${esc(row.loan_security)}`).join(", ") || "—"}</td>
+                      <td><a href="#/lombard/${esc(need.need_id)}">Stand</a></td>
+                    </tr>`
+                  )
+                  .join("")
+              : emptyRow(5, "Noch kein Lombardantrag.")
+          }
+        </tbody>
+      </table>
+    </section>
+  `;
+  const form = document.getElementById("lombard-form");
+  if (!form) return;
+  const byCode = new Map(priced.map((row) => [row.code, row]));
+  const pledgesOf = () =>
+    [0, 1, 2]
+      .map((i) => ({ loan_security: form.elements[`sec${i}`].value, qty: lombardQty(form.elements[`qty${i}`].value) }))
+      .filter((row) => row.loan_security && row.qty > 0);
+  const valueOf = (pledges) =>
+    pledges.reduce((sum, row) => {
+      const security = byCode.get(row.loan_security);
+      return security ? sum + row.qty * security.price * (1 - security.haircut / 100) : sum;
+    }, 0);
+  const update = () => {
+    const value = valueOf(pledgesOf());
+    const amount = lombardQty(form.elements.amount.value);
+    const target = document.getElementById("lombard-value");
+    target.textContent = `Belehnungswert nach Abschlag: ${formatChf(value)}${amount > value ? " — Betrag zu hoch" : ""}`;
+    target.className = amount > value && amount > 0 ? "error" : "muted";
+  };
+  form.addEventListener("input", update);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const pledges = pledgesOf();
+    const amount = String(form.elements.amount.value).replace(/'/g, "");
+    const customer = form.elements.customer_id.value;
+    act(
+      () =>
+        api("/lombard", {
+          method: "POST",
+          body: JSON.stringify({ customer_id: customer, amount, pledges, custody_ref: form.elements.custody_ref.value, confirm: true })
+        }).then((created) => {
+          if (created?.need?.need_id) window.location.hash = `#/lombard/${created.need.need_id}`;
+        }),
+      `Lombardkredit über ${formatChf(amount)} für ${partyLabel(customer)} in Frappe Lending beantragen? Lending prüft, genehmigt, verpfändet und zahlt aus; die Werte bleiben beim Multisig-Treuhänder.`
+    );
+  });
+}
+
+function lombardStatusHtml(pack) {
+  if (!pack.configured) return `<p class="muted">${esc(pack.message || "Frappe Lending ist nicht eingerichtet.")}</p>`;
+  const status = pack.lending;
+  if (!status) return `<p class="muted">In Lending ist zu diesem Antrag noch nichts vorhanden.</p>`;
+  const link = `<a href="${esc(status.deep_link)}" target="_blank" rel="noopener">In Lending öffnen</a>`;
+  const shortfall = status.shortfall
+    ? `<p class="error" role="alert">Unterdeckung seit ${formatDate(status.shortfall.since)}: Nachschuss ${formatChf(status.shortfall.shortfall_amount)} (Sicherheitenwert ${formatChf(status.shortfall.security_value)}).</p>`
+    : status.stage === "LOAN"
+      ? `<p class="muted">Keine Unterdeckung.</p>`
+      : "";
+  const pledges = (status.pledges || []).length
+    ? `<table>
+        <thead><tr><th>Sicherheit</th><th>Menge</th><th>Kurs</th><th>Wert</th><th>nach Abschlag</th></tr></thead>
+        <tbody>${status.pledges
+          .map(
+            (row) => `<tr>
+              <td class="mono">${esc(row.loan_security)}</td><td>${esc(row.qty)}</td><td>${formatChf(row.loan_security_price)}</td>
+              <td>${formatChf(row.amount)}</td><td>${formatChf(row.post_haircut_amount)} <span class="muted">(${esc(row.haircut)} %)</span></td>
+            </tr>`
+          )
+          .join("")}</tbody>
+      </table>`
+    : "";
+  const application = status.application
+    ? `<tr><th>Antrag</th><td>${esc(status.application.name)} · ${esc(status.application.status)}</td></tr>
+       <tr><th>Beantragt</th><td>${formatChf(status.application.loan_amount)}</td></tr>
+       <tr><th>Maximal (Lending)</th><td>${formatChf(status.application.maximum_loan_amount)}</td></tr>`
+    : "";
+  const loan = status.loan
+    ? `<tr><th>Kredit</th><td>${esc(status.loan.name)} · ${esc(status.loan.status)}</td></tr>
+       <tr><th>Ausbezahlt</th><td>${formatChf(status.loan.disbursed_amount)}</td></tr>
+       <tr><th>Bezahlt</th><td>${formatChf(status.loan.total_amount_paid)}</td></tr>`
+    : "";
+  const security = status.security
+    ? `<tr><th>Sicherheitenwert</th><td>${formatChf(status.security.total_security_value)} · ${esc(status.security.status)}</td></tr>
+       <tr><th>Belehnungsgrenze</th><td>${formatChf(status.security.maximum_loan_value)}</td></tr>`
+    : "";
+  return `${shortfall}<table><tbody>${application}${loan}${security}</tbody></table>${pledges}
+    <p>${link} · <span class="muted">Quelle ${esc(status.source)}</span></p>`;
+}
+
+async function renderLombardDossier(id) {
+  let pack;
+  try {
+    pack = await api(`/lombard/${encodeURIComponent(id)}`);
+  } catch (error) {
+    main.innerHTML = notFoundCard("Lombardantrag", error.message, "#/lombard", "Lombard");
+    return;
+  }
+  const need = pack.need;
+  main.innerHTML = `
+    <p class="muted"><a href="#/lombard">← Lombard</a></p>
+    <h1>Lombardkredit ${formatChf(need.amount)}</h1>
+    <p class="lead">${esc(partyLabel(need.seeker_party_id))} · beantragt ${formatDate(need.confirmed_at)} · <span class="mono">${esc(need.need_id)}</span></p>
+    ${errorLine()}
+    <div class="grid-2">
+      <section class="card">
+        <h2>Antrag in Sponsum</h2>
+        <table><tbody>
+          <tr><th>Sicherheiten</th><td>${(need.collateral || []).map((row) => `${esc(row.qty)} ${esc(row.loan_security)}`).join(", ") || "—"}</td></tr>
+          <tr><th>Verwahrung</th><td class="mono">${esc(need.custody_ref || "—")}</td></tr>
+          <tr><th>Beantragt von</th><td>${esc(need.confirmed_by || "—")}</td></tr>
+        </tbody></table>
+        <p class="muted">${esc(need.legal_note)} Beim Verpfänden in Lending die Verwahrung in „Reference No“ der Loan Security Assignment übernehmen.</p>
+      </section>
+      <section class="card">
+        <h2>Frappe Lending</h2>
+        ${lombardStatusHtml(pack)}
+      </section>
+    </div>
+  `;
 }
 
 async function renderCapitalProviderDossier(id) {

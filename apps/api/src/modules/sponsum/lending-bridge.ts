@@ -32,7 +32,12 @@ export type LendingErrorCode =
   | "customer_not_found"
   | "currency_mismatch"
   | "invalid_amount"
-  | "loan_amount_exceeds_receivable";
+  | "loan_amount_exceeds_receivable"
+  | "lombard_without_collateral"
+  | "lombard_security_unknown"
+  | "lombard_security_without_price"
+  | "lombard_amount_exceeds_collateral"
+  | "custody_reference_invalid";
 
 export class LendingError extends Error {
   constructor(
@@ -51,12 +56,15 @@ export type LendingConfig = {
   apiSecret: string;
   company: string;
   loanProduct: string;
+  /** O12: Lombard credit product (MOVENA_LENDING_LOMBARD_PRODUCT); null keeps Lombard requests switched off. */
+  lombardProduct?: string | null;
 };
 
 /**
  * MOVENA_LENDING_URL, MOVENA_LENDING_SITE (optional), MOVENA_LENDING_CREDENTIALS_FILE (one line `<key>:<secret>`
- * of the technical ERPNext user, never in the repo), MOVENA_LENDING_COMPANY, MOVENA_LENDING_LOAN_PRODUCT.
- * Returns null while anything is missing: the loan product and accounts are not decided yet (O1).
+ * of the technical ERPNext user, never in the repo), MOVENA_LENDING_COMPANY, MOVENA_LENDING_LOAN_PRODUCT,
+ * MOVENA_LENDING_LOMBARD_PRODUCT (optional, O12).
+ * Returns null while anything required is missing: the loan product and accounts are not decided yet (O1).
  */
 export function lendingConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
@@ -81,11 +89,12 @@ export function lendingConfigFromEnv(
     apiKey: credentials.slice(0, separator),
     apiSecret: credentials.slice(separator + 1),
     company,
-    loanProduct
+    loanProduct,
+    lombardProduct: (env.MOVENA_LENDING_LOMBARD_PRODUCT ?? "").trim() || null
   };
 }
 
-export type LendingFilter = [string, "=" | "!=", string | number];
+export type LendingFilter = [string, "=" | "!=" | "<=" | ">=", string | number];
 export type LendingDoc = Record<string, unknown>;
 
 /** The slice of the Frappe REST API Sponsum uses. Implemented over HTTP and in-memory (lending-mock.ts). */
@@ -434,4 +443,305 @@ export async function readLendingStatus(receivableId: string, deps: LendingDeps)
     };
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// O12 Lombard credit (movena-suite docs/architecture/frappe-lending-lombard.md). Lending is SoR for securities,
+// prices, pledges and shortfall; Sponsum shows them and creates one draft secured Loan Application per request.
+
+export type LombardSecurity = {
+  code: string;
+  name: string;
+  type: string;
+  haircut: number;
+  loan_to_value_ratio: number;
+  price: number | null;
+  price_valid_upto: string | null;
+};
+
+export type LombardPledge = { loan_security: string; qty: number };
+
+/** Lending stores datetimes in the site time zone (Europe/Zurich on erp.movena.ch). */
+function lendingNow(date = new Date()): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Zurich",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23"
+    })
+      .formatToParts(date)
+      .map((part) => [part.type, part.value])
+  );
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+/** Active securities with haircut/LTV (own value, else the type's) and the price valid now; null price = not usable. */
+export async function listLombardSecurities(deps: LendingDeps & { now?: Date }): Promise<LombardSecurity[]> {
+  const { transport } = requireConfigured(deps);
+  const now = lendingNow(deps.now);
+  const [securities, types, prices] = await Promise.all([
+    transport.list("Loan Security", [["disabled", "=", 0]], ["name", "loan_security_name", "loan_security_type", "haircut", "loan_to_value_ratio"], 200),
+    transport.list("Loan Security Type", [["disabled", "=", 0]], ["name", "haircut", "loan_to_value_ratio"], 50),
+    transport.list(
+      "Loan Security Price",
+      [
+        ["valid_from", "<=", now],
+        ["valid_upto", ">=", now]
+      ],
+      ["loan_security", "loan_security_price", "valid_upto"],
+      500
+    )
+  ]);
+  const typeMap = new Map(types.map((row) => [String(row.name), row]));
+  const priceMap = new Map(prices.map((row) => [String(row.loan_security), row]));
+  return securities
+    .filter((row) => typeMap.has(String(row.loan_security_type)))
+    .map((row) => {
+      const type = typeMap.get(String(row.loan_security_type))!;
+      const price = priceMap.get(String(row.name));
+      return {
+        code: String(row.name),
+        name: String(row.loan_security_name || row.name),
+        type: String(row.loan_security_type),
+        haircut: Number(row.haircut || type.haircut || 0),
+        loan_to_value_ratio: Number(row.loan_to_value_ratio || type.loan_to_value_ratio || 0),
+        price: price ? Number(price.loan_security_price) : null,
+        price_valid_upto: price ? String(price.valid_upto) : null
+      };
+    })
+    .sort((a, b) => a.type.localeCompare(b.type, "de-CH") || a.code.localeCompare(b.code, "de-CH"));
+}
+
+/**
+ * Multisig custody (O12 L-D): Sponsum keeps only a public reference (address, descriptor with xpubs, depot number).
+ * Anything that looks like a private key or seed phrase is refused, so it never lands in Sponsum or its logs.
+ */
+export function assertCustodyReference(value: unknown): string {
+  const ref = String(value ?? "").trim();
+  if (!ref || ref.length > 300) {
+    throw new LendingError("custody_reference_invalid", "Verwahrung fehlt: Multisig-Adresse, -Descriptor oder Depot-Nr. angeben.");
+  }
+  const looksPrivate =
+    /\b[xyztuv]prv[1-9A-HJ-NP-Za-km-z]{20,}/i.test(ref) ||
+    /(^|\s)[5KLc9][1-9A-HJ-NP-Za-km-z]{50,51}(\s|$)/.test(ref) ||
+    /(^|[^0-9a-f])[0-9a-f]{64}([^0-9a-f]|$)/i.test(ref) ||
+    /^([a-z]+\s+){11,}[a-z]+$/.test(ref.toLowerCase());
+  if (looksPrivate) {
+    throw new LendingError(
+      "custody_reference_invalid",
+      "Das sieht nach einem privaten Schlüssel oder einer Seed-Phrase aus. Nur öffentliche Angaben erfassen, nie Schlüssel."
+    );
+  }
+  return ref;
+}
+
+function normalizePledges(pledges: unknown): LombardPledge[] {
+  const merged = new Map<string, number>();
+  for (const row of Array.isArray(pledges) ? pledges : []) {
+    const code = String((row as LombardPledge)?.loan_security ?? "").trim();
+    const qty = Number((row as LombardPledge)?.qty);
+    if (!code && !qty) continue;
+    if (!code || !Number.isFinite(qty) || qty <= 0) {
+      throw new LendingError("invalid_amount", "Jede Sicherheit braucht eine positive Menge.");
+    }
+    merged.set(code, (merged.get(code) ?? 0) + qty);
+  }
+  if (!merged.size) throw new LendingError("lombard_without_collateral", "Ein Lombardkredit braucht mindestens eine Sicherheit.");
+  return [...merged].map(([loan_security, qty]) => ({ loan_security, qty }));
+}
+
+export type LombardResult = {
+  created: boolean;
+  loan_application: string;
+  loan: string | null;
+  collateral_value_after_haircut: number;
+  deep_link: string;
+  source: "LENDING · Loan Application" | "LENDING · Loan";
+};
+
+/**
+ * One draft secured Loan Application (product MOVENA_LENDING_LOMBARD_PRODUCT, is_secured_loan, proposed pledges) per
+ * Sponsum request, idempotent on the request id (movena_sponsum_capital_need_id). Sponsum pre-checks the amount
+ * against the collateral value after haircut with Lending's prices; Lending recomputes and decides.
+ */
+export async function requestLombardApplication(
+  input: { requestId: string; customerId: string; amount: string; pledges: unknown; confirm?: boolean; now?: Date },
+  deps: LendingDeps
+): Promise<LombardResult> {
+  if (input.confirm !== true) {
+    throw new LendingError("confirmation_required", "Lombardantrag braucht eine explizite Bestätigung.");
+  }
+  const { config, transport } = requireConfigured(deps);
+  if (!config.lombardProduct) {
+    throw new LendingError("lending_not_configured", "Das Produkt für Lombardkredite ist in Sponsum nicht eingerichtet.");
+  }
+  const byRequest: LendingFilter[] = [
+    [SPONSUM_CAPITAL_NEED_FIELD, "=", input.requestId],
+    ["docstatus", "!=", 2]
+  ];
+  const open = (docs: LendingDoc[]) =>
+    docs.find((doc) => !["Rejected", "Closed", "Settled", "Written Off"].includes(String(doc.status ?? ""))) ?? null;
+  const [applications, loans] = await Promise.all([
+    transport.list("Loan Application", byRequest, ["name", "status"], 5),
+    transport.list("Loan", byRequest, ["name", "status"], 5)
+  ]);
+  const existingLoan = open(loans);
+  const existingApplication = open(applications);
+  if (existingLoan || existingApplication) {
+    const loan = existingLoan ? String(existingLoan.name) : null;
+    const application = existingApplication ? String(existingApplication.name) : "";
+    return {
+      created: false,
+      loan_application: application,
+      loan,
+      collateral_value_after_haircut: 0,
+      deep_link: loan ? deskLink(config, "loan", loan) : deskLink(config, "loan-application", application),
+      source: loan ? "LENDING · Loan" : "LENDING · Loan Application"
+    };
+  }
+
+  const customer = customerFromParty(String(input.customerId ?? ""));
+  if (!customer) throw new LendingError("borrower_not_customer", "Kreditnehmer muss in ERPNext als Kunde geführt sein.");
+  if (cents(input.amount, "Kreditbetrag") <= 0n) throw new LendingError("invalid_amount", "Kreditbetrag muss grösser als null sein.");
+  const pledges = normalizePledges(input.pledges);
+  const securities = new Map((await listLombardSecurities({ ...deps, now: input.now })).map((row) => [row.code, row]));
+  let collateral = 0;
+  for (const pledge of pledges) {
+    const security = securities.get(pledge.loan_security);
+    if (!security) throw new LendingError("lombard_security_unknown", `Sicherheit ${pledge.loan_security} ist in Lending nicht aktiv.`);
+    if (security.price === null) {
+      throw new LendingError("lombard_security_without_price", `Für ${security.name} gibt es in Lending keinen gültigen Kurs.`);
+    }
+    collateral += pledge.qty * security.price * (1 - security.haircut / 100);
+  }
+  collateral = Math.floor(collateral * 100) / 100;
+  if (Number(cents(input.amount, "Kreditbetrag")) / 100 > collateral) {
+    throw new LendingError(
+      "lombard_amount_exceeds_collateral",
+      `Kreditbetrag übersteigt den Belehnungswert der Sicherheiten (CHF ${collateral.toFixed(2)} nach Abschlag).`
+    );
+  }
+  if (!(await transport.get("Customer", customer))) {
+    throw new LendingError("customer_not_found", `Kunde ${customer} existiert in ERPNext nicht.`);
+  }
+  const created = await transport.insert("Loan Application", {
+    applicant_type: "Customer",
+    applicant: customer,
+    company: config.company,
+    loan_product: config.lombardProduct,
+    loan_amount: input.amount,
+    is_secured_loan: 1,
+    proposed_pledges: pledges.map((pledge) => ({ loan_security: pledge.loan_security, qty: pledge.qty })),
+    [SPONSUM_CAPITAL_NEED_FIELD]: input.requestId
+  });
+  const name = String(created.name ?? "");
+  return {
+    created: true,
+    loan_application: name,
+    loan: null,
+    collateral_value_after_haircut: collateral,
+    deep_link: deskLink(config, "loan-application", name),
+    source: "LENDING · Loan Application"
+  };
+}
+
+export type LombardStatus = {
+  stage: "APPLICATION" | "LOAN";
+  application: { name: string; status: string; loan_amount: unknown; maximum_loan_amount: unknown } | null;
+  pledges: Array<{ loan_security: string; qty: unknown; loan_security_price: unknown; amount: unknown; haircut: unknown; post_haircut_amount: unknown }>;
+  loan: { name: string; status: string; loan_amount: unknown; disbursed_amount: unknown; total_amount_paid: unknown } | null;
+  security: { total_security_value: unknown; maximum_loan_value: unknown; status: string } | null;
+  shortfall: { shortfall_amount: unknown; security_value: unknown; since: unknown } | null;
+  source: "LENDING · Loan Application" | "LENDING · Loan";
+  deep_link: string;
+};
+
+/** Read-only Lombard status, every value as Lending computed it (pledges, maximum amount, security value, shortfall). */
+export async function readLombardStatus(requestId: string, deps: LendingDeps): Promise<LombardStatus | null> {
+  const { config, transport } = requireConfigured(deps);
+  const byRequest: LendingFilter[] = [
+    [SPONSUM_CAPITAL_NEED_FIELD, "=", requestId],
+    ["docstatus", "!=", 2]
+  ];
+  const [applications, loans] = await Promise.all([
+    transport.list("Loan Application", byRequest, ["name"], 5),
+    transport.list("Loan", byRequest, ["name", "status", "loan_amount", "disbursed_amount", "total_amount_paid"], 5)
+  ]);
+  if (!applications.length && !loans.length) return null;
+  const applicationDoc = applications[0] ? await transport.get("Loan Application", String(applications[0].name)) : null;
+  const application = applicationDoc
+    ? {
+        name: String(applicationDoc.name),
+        status: String(applicationDoc.status ?? ""),
+        loan_amount: applicationDoc.loan_amount,
+        maximum_loan_amount: applicationDoc.maximum_loan_amount
+      }
+    : null;
+  const pledges = (Array.isArray(applicationDoc?.proposed_pledges) ? (applicationDoc!.proposed_pledges as LendingDoc[]) : []).map((row) => ({
+    loan_security: String(row.loan_security ?? ""),
+    qty: row.qty,
+    loan_security_price: row.loan_security_price,
+    amount: row.amount,
+    haircut: row.haircut,
+    post_haircut_amount: row.post_haircut_amount
+  }));
+  const loanRow = loans[0];
+  if (!loanRow) {
+    return {
+      stage: "APPLICATION",
+      application,
+      pledges,
+      loan: null,
+      security: null,
+      shortfall: null,
+      source: "LENDING · Loan Application",
+      deep_link: deskLink(config, "loan-application", application?.name ?? "")
+    };
+  }
+  const loanName = String(loanRow.name);
+  const [assignments, shortfalls] = await Promise.all([
+    transport.list(
+      "Loan Security Assignment",
+      [
+        ["loan", "=", loanName],
+        ["docstatus", "=", 1]
+      ],
+      ["name", "status", "total_security_value", "maximum_loan_value"],
+      5
+    ),
+    transport.list(
+      "Loan Security Shortfall",
+      [
+        ["loan", "=", loanName],
+        ["status", "=", "Pending"]
+      ],
+      ["name", "shortfall_amount", "security_value", "shortfall_time"],
+      1
+    )
+  ]);
+  const assignment = assignments[0];
+  const shortfall = shortfalls[0];
+  return {
+    stage: "LOAN",
+    application,
+    pledges,
+    loan: {
+      name: loanName,
+      status: String(loanRow.status ?? ""),
+      loan_amount: loanRow.loan_amount,
+      disbursed_amount: loanRow.disbursed_amount,
+      total_amount_paid: loanRow.total_amount_paid
+    },
+    security: assignment
+      ? { total_security_value: assignment.total_security_value, maximum_loan_value: assignment.maximum_loan_value, status: String(assignment.status ?? "") }
+      : null,
+    shortfall: shortfall ? { shortfall_amount: shortfall.shortfall_amount, security_value: shortfall.security_value, since: shortfall.shortfall_time } : null,
+    source: "LENDING · Loan",
+    deep_link: deskLink(config, "loan", loanName)
+  };
 }

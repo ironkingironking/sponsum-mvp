@@ -4,9 +4,13 @@ import test from "node:test";
 import {
   createHttpLendingTransport,
   LendingError,
+  assertCustodyReference,
   lendingConfigFromEnv,
   listLendingCustomers,
+  listLombardSecurities,
   readLendingStatus,
+  readLombardStatus,
+  requestLombardApplication,
   requestLoanApplication,
   type LendableCapitalNeed,
   type LendableReceivable,
@@ -279,4 +283,109 @@ test("customers of the lending company: active ones, as customer:<name> ids, sor
   );
   assert.equal(customers[0].name, "Nordholz AG");
   await rejectsWith(listLendingCustomers({ config: null, transport: null }), "lending_not_configured");
+});
+
+// O12 Lombard credit
+function lombardSetup() {
+  const mock = createLendingMock();
+  mock.addCustomer("Nordholz AG");
+  mock.addSecurity("BTC", "Kryptowährung", 50, 70000);
+  mock.addSecurity("CH0012032048", "Wertschriften", 70, 250);
+  mock.addSecurity("XAU", "Edelmetalle", 60);
+  mock.addSecurity("OLD", "Kryptowährung", 50, 1, { from: "2026-01-01 00:00:00", upto: "2026-01-02 00:00:00" });
+  const deps = { config: { ...config, lombardProduct: "Lombardkredit" }, transport: mock };
+  return { mock, deps };
+}
+
+test("lombard securities: haircut/LTV from the type, only prices valid now", async () => {
+  const { deps } = lombardSetup();
+  const rows = await listLombardSecurities({ ...deps, now: new Date("2026-10-03T12:00:00Z") });
+  const btc = rows.find((row) => row.code === "BTC")!;
+  assert.deepEqual([btc.haircut, btc.loan_to_value_ratio, btc.price], [50, 50, 70000]);
+  assert.equal(rows.find((row) => row.code === "CH0012032048")!.haircut, 30);
+  assert.equal(rows.find((row) => row.code === "XAU")!.price, null);
+  assert.equal(rows.find((row) => row.code === "OLD")!.price, null, "expired price is not used");
+});
+
+test("lombard request: checks collateral with Lending's prices, then one secured draft application", async () => {
+  const { mock, deps } = lombardSetup();
+  const base = { requestId: "lom-1", customerId: "customer:Nordholz AG", confirm: true, now: new Date("2026-10-03T12:00:00Z") };
+  await rejectsWith(requestLombardApplication({ ...base, amount: "1000", pledges: [], confirm: undefined }, deps), "confirmation_required");
+  await rejectsWith(requestLombardApplication({ ...base, amount: "1000", pledges: [] }, deps), "lombard_without_collateral");
+  await rejectsWith(requestLombardApplication({ ...base, amount: "1000", pledges: [{ loan_security: "DOGE", qty: 1 }] }, deps), "lombard_security_unknown");
+  await rejectsWith(requestLombardApplication({ ...base, amount: "1000", pledges: [{ loan_security: "XAU", qty: 1 }] }, deps), "lombard_security_without_price");
+  await rejectsWith(requestLombardApplication({ ...base, amount: "1000", pledges: [{ loan_security: "BTC", qty: -1 }] }, deps), "invalid_amount");
+  // 0.5 BTC x 70'000 x (1 - 50 %) = 17'500 + 100 x 250 x (1 - 30 %) = 17'500 -> 35'000 after haircut
+  await rejectsWith(
+    requestLombardApplication({ ...base, amount: "35000.01", pledges: [{ loan_security: "BTC", qty: 0.5 }, { loan_security: "CH0012032048", qty: 100 }] }, deps),
+    "lombard_amount_exceeds_collateral"
+  );
+  await rejectsWith(requestLombardApplication({ ...base, customerId: "company:Movena GmbH", amount: "1000", pledges: [{ loan_security: "BTC", qty: 1 }] }, deps), "borrower_not_customer");
+  assert.equal(mock.calls.filter((call) => call.op === "insert").length, 0);
+
+  const result = await requestLombardApplication(
+    { ...base, amount: "35000", pledges: [{ loan_security: "BTC", qty: 0.25 }, { loan_security: "BTC", qty: 0.25 }, { loan_security: "CH0012032048", qty: 100 }] },
+    deps
+  );
+  assert.equal(result.created, true);
+  assert.equal(result.collateral_value_after_haircut, 35000);
+  const [application] = mock.docs.get("Loan Application")!;
+  assert.equal(application.loan_product, "Lombardkredit");
+  assert.equal(application.is_secured_loan, 1);
+  assert.equal(application.movena_sponsum_capital_need_id, "lom-1");
+  assert.deepEqual(
+    (application.proposed_pledges as Array<{ loan_security: string; qty: number }>).map((row) => [row.loan_security, row.qty]),
+    [["BTC", 0.5], ["CH0012032048", 100]],
+    "same security merged"
+  );
+  assert.equal(application.maximum_loan_amount, 35000, "Lending's own maximum matches the pre-check");
+
+  const again = await requestLombardApplication({ ...base, amount: "35000", pledges: [{ loan_security: "BTC", qty: 0.5 }] }, deps);
+  assert.equal(again.created, false);
+  assert.equal(mock.docs.get("Loan Application")!.length, 1);
+
+  await rejectsWith(
+    requestLombardApplication({ ...base, requestId: "lom-2", amount: "1000", pledges: [{ loan_security: "BTC", qty: 1 }] }, { ...deps, config: { ...deps.config, lombardProduct: null } }),
+    "lending_not_configured"
+  );
+});
+
+test("lombard status: pledges and maximum from Lending, then loan, security value and shortfall", async () => {
+  const { mock, deps } = lombardSetup();
+  assert.equal(await readLombardStatus("lom-1", deps), null);
+  const created = await requestLombardApplication(
+    { requestId: "lom-1", customerId: "customer:Nordholz AG", amount: "20000", pledges: [{ loan_security: "BTC", qty: 1 }], confirm: true, now: new Date("2026-10-03T12:00:00Z") },
+    deps
+  );
+  const pending = await readLombardStatus("lom-1", deps);
+  assert.equal(pending?.stage, "APPLICATION");
+  assert.equal(pending?.application?.maximum_loan_amount, 35000);
+  assert.deepEqual(pending?.pledges.map((row) => [row.loan_security, row.post_haircut_amount]), [["BTC", 35000]]);
+
+  const loan = mock.approveAndCreateLoan(created.loan_application);
+  mock.addShortfall(loan, 1500, 30000);
+  const active = await readLombardStatus("lom-1", deps);
+  assert.equal(active?.stage, "LOAN");
+  assert.equal(active?.loan?.name, loan);
+  assert.deepEqual([active?.security?.total_security_value, active?.security?.maximum_loan_value], [70000, 35000]);
+  assert.deepEqual([active?.shortfall?.shortfall_amount, active?.shortfall?.security_value], [1500, 30000]);
+});
+
+test("custody reference: public addresses, descriptors and depot numbers yes, keys and seeds never", () => {
+  for (const ok of [
+    "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+    "wsh(multi(2,xpub6CUGRUonZSQ4TWtTMmzXdrXDtypWKiKrhko4egpiMZbpiaQL2jkwSB1icqYh2cfDfVxdx4df189oLKnC5fSwqPfgyP3hooxujYzAu3fDVmz,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y))",
+    "Depot 0815-123456.01 bei Treuhand AG"
+  ]) {
+    assert.equal(assertCustodyReference(ok), ok);
+  }
+  for (const bad of [
+    "",
+    "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi",
+    "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ",
+    "e9873d79c6d87dc0fb6a5778633389f4453213303da61f20bd67fc233aa33262",
+    "abandon ability able about above absent absorb abstract absurd abuse access accident"
+  ]) {
+    assert.throws(() => assertCustodyReference(bad), (error: unknown) => error instanceof LendingError && error.code === "custody_reference_invalid", bad.slice(0, 12));
+  }
 });

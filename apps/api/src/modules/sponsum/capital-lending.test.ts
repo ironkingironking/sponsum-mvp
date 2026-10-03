@@ -187,3 +187,51 @@ test("end to end with a customer as creditor and seeker: receivable, confirmatio
   assert.equal(result.created, true);
   assert.equal(mock.docs.get("Loan Application")![0].applicant, "Nordholz AG");
 });
+
+function withLombard(service: SponsumService) {
+  const mock = createLendingMock();
+  mock.addCustomer("Nordholz AG");
+  mock.addSecurity("BTC", "Kryptowährung", 50, 70000);
+  service.setLendingDeps(() => ({ config: { ...config, lombardProduct: "Lombardkredit" }, transport: mock }));
+  return mock;
+}
+
+test("lombard overview: lending tenant admins only, configured only with a Lombard product", async () => {
+  const service = new SponsumService();
+  withMock(service);
+  assert.equal((await service.lombardOverview()).configured, false, "no Lombard product set");
+  withLombard(service);
+  const overview = await inScope(admin, () => service.lombardOverview());
+  assert.equal(overview.configured, true);
+  assert.equal(overview.product, "Lombardkredit");
+  assert.deepEqual(overview.securities.map((row) => [row.code, row.price]), [["BTC", 70000]]);
+  await assert.rejects(inScope(member, () => service.lombardOverview()), domainCode("forbidden"));
+  assert.equal((await inScope({ ...admin, tenantId: "t2" }, () => service.lombardOverview())).configured, false);
+});
+
+test("lombard request: refused requests leave nothing, accepted ones are recorded with collateral and events", async () => {
+  const service = new SponsumService();
+  const mock = withLombard(service);
+  const base = { customer_id: "customer:Nordholz AG", pledges: [{ loan_security: "BTC", qty: 1 }], custody_ref: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq", confirm: true };
+
+  await assert.rejects(service.requestLombard({ ...base, amount: "1000", custody_ref: "" }), domainCode("custody_reference_invalid"));
+  await assert.rejects(service.requestLombard({ ...base, amount: "35000.01" }), domainCode("lombard_amount_exceeds_collateral"));
+  await assert.rejects(inScope(member, () => service.requestLombard({ ...base, amount: "1000" })), domainCode("forbidden"));
+  assert.equal(service.listCapitalNeeds().filter((need) => need.kind === "LOMBARD").length, 0);
+  assert.equal(mock.docs.get("Loan Application")?.length ?? 0, 0);
+
+  const { need, lending } = await service.requestLombard({ ...base, amount: "20000" });
+  assert.equal(need.kind, "LOMBARD");
+  assert.equal(need.status, "CONFIRMED");
+  assert.equal(need.amount, "20000.00");
+  assert.deepEqual(need.collateral, [{ loan_security: "BTC", qty: 1 }]);
+  assert.equal(lending.created, true);
+  assert.equal(mock.docs.get("Loan Application")![0].movena_sponsum_capital_need_id, need.need_id);
+  const events = service.capitalNeedDossier(need.need_id).events.map((event) => event.event_type);
+  assert.deepEqual(events, ["CAPITAL_NEED_CONFIRMED", "LENDING_APPLICATION_REQUESTED"]);
+
+  const status = await service.lombardStatus(need.need_id);
+  assert.equal(status.lending?.stage, "APPLICATION");
+  assert.equal(status.lending?.application?.maximum_loan_amount, 35000);
+  await assert.rejects(service.lombardStatus("lom-missing"), domainCode("not_found"));
+});

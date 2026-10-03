@@ -17,7 +17,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname } from "node:path";
 import { normalizeWorkbench } from "./dispute-workbench.js";
 
-export type CapitalKind = "EQUITY" | "SHORT_DEBT" | "LONG_DEBT";
+/** LOMBARD (O12): credit against pledged securities in Frappe Lending, created only via the Lombard request. */
+export type CapitalKind = "EQUITY" | "SHORT_DEBT" | "LONG_DEBT" | "LOMBARD";
 
 export type CapitalNeed = {
   need_id: string;
@@ -34,6 +35,9 @@ export type CapitalNeed = {
   receivable_id: string | null;
   confirmed_by?: string | null;
   confirmed_at?: string | null;
+  /** LOMBARD: securities as requested (Lending holds the pledge) and the public multisig/depot reference. */
+  collateral?: Array<{ loan_security: string; qty: number }>;
+  custody_ref?: string;
   legal_note: string;
   created_at: string;
 };

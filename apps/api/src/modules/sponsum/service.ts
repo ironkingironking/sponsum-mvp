@@ -59,10 +59,14 @@ import {
   assertLendable,
   createHttpLendingTransport,
   LendingError,
+  assertCustodyReference,
   lendingConfigFromEnv,
   listLendingCustomers,
+  listLombardSecurities,
   readLendingStatus,
+  readLombardStatus,
   requestLoanApplication,
+  requestLombardApplication,
   type LendingDeps
 } from "./lending-bridge.js";
 import { assessJurisdiction } from "./jurisdiction-deadlines.js";
@@ -2356,6 +2360,117 @@ export class SponsumService {
     } catch (error) {
       if (error instanceof LendingError && error.code === "lending_not_configured") {
         return { configured: false, customers: [], message: error.message };
+      }
+      throw lendingToDomain(error);
+    }
+  }
+
+  /** Lombard (O12) is offered to tenant admins of the lending tenant only, like the customer list. */
+  private lombardGate(action: string): { tenantOk: boolean } {
+    const who = principal();
+    if (who && !who.admin) throw new DomainError("forbidden", `Nur die Mandantenadministration kann ${action}.`);
+    const lendingTenant = (process.env.MOVENA_LENDING_TENANT || who?.legacyTenant || "").trim();
+    return { tenantOk: !who || who.tenantId === lendingTenant };
+  }
+
+  /** Lombard page: securities with Lending's current prices, haircut and LTV, plus this tenant's Lombard requests. */
+  async lombardOverview() {
+    const { tenantOk } = this.lombardGate("Lombardkredite sehen");
+    const requests = this.store.snapshot().capital_needs.filter((need) => need.kind === "LOMBARD");
+    if (!tenantOk) {
+      return { configured: false, product: null, securities: [], requests: [], message: "Frappe Lending ist für diesen Mandanten nicht freigeschaltet." };
+    }
+    const deps = this.lendingDeps();
+    if (!deps.config?.lombardProduct) {
+      return { configured: false, product: null, securities: [], requests, message: "Lombardkredite sind in Sponsum noch nicht eingerichtet." };
+    }
+    try {
+      return { configured: true, product: deps.config.lombardProduct, securities: await listLombardSecurities(deps), requests };
+    } catch (error) {
+      if (error instanceof LendingError && error.code === "lending_not_configured") {
+        return { configured: false, product: null, securities: [], requests, message: error.message };
+      }
+      throw lendingToDomain(error);
+    }
+  }
+
+  /**
+   * O12 Lombard request by a tenant admin: one draft secured Loan Application in Lending first; only when Lending
+   * accepted it, Sponsum records the request (kind LOMBARD, confirmed, collateral as requested, public custody
+   * reference) and the events. A refused request leaves nothing behind in either system.
+   */
+  async requestLombard(input: { customer_id?: string; amount?: string; pledges?: unknown; custody_ref?: string; confirm?: boolean } = {}) {
+    const { tenantOk } = this.lombardGate("einen Lombardkredit beantragen");
+    if (!tenantOk) throw new DomainError("forbidden", "Frappe Lending ist für diesen Mandanten nicht freigeschaltet.");
+    const who = principal();
+    let custodyRef: string;
+    try {
+      custodyRef = assertCustodyReference(input.custody_ref);
+    } catch (error) {
+      throw lendingToDomain(error);
+    }
+    const amount = money(String(input.amount ?? ""));
+    const needId = `lom-${randomUUID().slice(0, 8)}`;
+    let result;
+    try {
+      result = await requestLombardApplication(
+        { requestId: needId, customerId: String(input.customer_id ?? ""), amount, pledges: input.pledges, confirm: input.confirm },
+        this.lendingDeps()
+      );
+    } catch (error) {
+      throw lendingToDomain(error);
+    }
+    const pledges = (Array.isArray(input.pledges) ? input.pledges : [])
+      .map((row) => ({ loan_security: String((row as { loan_security?: unknown }).loan_security ?? ""), qty: Number((row as { qty?: unknown }).qty) }))
+      .filter((row) => row.loan_security && row.qty > 0);
+    const now = new Date().toISOString();
+    const need: CapitalNeed = {
+      need_id: needId,
+      seeker_party_id: String(input.customer_id),
+      kind: "LOMBARD",
+      amount,
+      currency: "CHF",
+      tenor_months: null,
+      purpose: "Lombardkredit",
+      sector: "KMU",
+      country: "CH",
+      status: "CONFIRMED",
+      receivable_id: null,
+      confirmed_by: who?.email ?? "system",
+      confirmed_at: now,
+      collateral: pledges,
+      custody_ref: custodyRef,
+      legal_note:
+        "Lombardkredit über Frappe Lending. Verwahrung per Multisig-Treuhand; Sponsum hält keine Werte und keine Schlüssel.",
+      created_at: now
+    };
+    const state = this.store.snapshot();
+    state.capital_needs.push(need);
+    this.appendEvent(state, {
+      type: "CAPITAL_NEED_CONFIRMED",
+      actor: who?.userId ?? need.seeker_party_id,
+      payload: { need_id: needId, kind: "LOMBARD", amount, collateral: pledges.map((row) => row.loan_security) }
+    });
+    this.appendEvent(state, {
+      type: "LENDING_APPLICATION_REQUESTED",
+      actor: who?.userId ?? need.seeker_party_id,
+      payload: { need_id: needId, loan_application: result.loan_application }
+    });
+    this.store.replace(state);
+    return { need, lending: result };
+  }
+
+  /** Read-only Lombard status of one request, live from Lending. */
+  async lombardStatus(needId: string) {
+    this.lombardGate("Lombardkredite sehen");
+    const key = decodeURIComponent(needId);
+    const need = this.store.snapshot().capital_needs.find((row) => row.need_id === key && row.kind === "LOMBARD");
+    if (!need) throw new DomainError("not_found", "Lombardantrag nicht gefunden");
+    try {
+      return { need, configured: true, lending: await readLombardStatus(need.need_id, this.lendingDeps()) };
+    } catch (error) {
+      if (error instanceof LendingError && error.code === "lending_not_configured") {
+        return { need, configured: false, lending: null, message: error.message };
       }
       throw lendingToDomain(error);
     }

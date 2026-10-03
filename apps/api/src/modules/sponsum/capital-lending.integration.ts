@@ -76,6 +76,13 @@ test("HTTP: confirm a capital need as tenant admin, Lending answers not configur
     const customersBody = (await customers.json()) as { configured: boolean; customers: unknown[] };
     assert.equal(customersBody.configured, false);
     assert.deepEqual(customersBody.customers, []);
+
+    const lombard = await fetch(`${api}/lombard`);
+    assert.equal(lombard.status, 200);
+    assert.equal(((await lombard.json()) as { configured: boolean }).configured, false);
+    const lombardRequest = await post("/lombard", { customer_id: "customer:Nordholz AG", amount: "1000", custody_ref: "", confirm: true });
+    assert.equal(lombardRequest.status, 400);
+    assert.equal(((await lombardRequest.json()) as { error: { code: string } }).error.code, "custody_reference_invalid");
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

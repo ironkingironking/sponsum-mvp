@@ -106,6 +106,13 @@ Stabil, Meldungen auf Deutsch.
    - Im Desk erscheinen die Kunden beim Kapitalbedarf als „Mandant oder Kunde“ und bei „Neue Forderung“ im neuen Feld „Gläubiger“. Default bleibt die eigene Firma.
    - Damit gilt für eine solche Forderung: Kunde = Gläubiger = Halter = Suchender. Genau das verlangt die Lending-Prüfung.
 
+8. **Lombardkredit (O12, 2026-10-03):** Seite „Lombard“ im Desk, nur für die Mandantenadministration des Lending-Mandanten.
+   - Sicherheiten mit aktuellem Lending-Kurs, Abschlag und Beleihungsquote (`GET /lombard`).
+   - Antrag (`POST /lombard`): Kunde, Betrag, bis zu drei Sicherheiten mit Menge, öffentliche Verwahr-Referenz. Erst wenn Lending den Entwurf der gesicherten Loan Application (Produkt `MOVENA_LENDING_LOMBARD_PRODUCT`, `is_secured_loan`, `proposed_pledges`) angenommen hat, hält Sponsum den Antrag als Kapitalbedarf der Art `LOMBARD` fest.
+   - Status (`GET /lombard/:id`): Verpfändung, Maximum, Sicherheitenwert und Unterdeckung, so wie Lending sie berechnet.
+   - Verwahr-Referenz: Private Schlüssel, Seeds und Hex-Schlüssel werden abgelehnt. In Lending kommt die Referenz in „Reference No“ der Loan Security Assignment.
+   - Desk-Smoke: `node e2e/lombard-desk.mjs` (Headless-Chromium, API simuliert).
+
 Noch offen für den Live-Betrieb: Kreditprodukt und Konten (O1), technischer Benutzer mit `Loan LOS User` + `Loan Reporter` + Lesezugriff auf Customer sowie die `MOVENA_LENDING_*`-Variablen in der `.env` des Dienstes (O8). Beides richtet ein Mensch ein.
 
 Test: `node --import tsx --test apps/api/src/modules/sponsum/lending-bridge.test.ts`, oder `npm test`.

@@ -28,7 +28,11 @@ function sendDomainError(error: unknown, res: import("express").Response): boole
             ? 503
             : error.code === "lending_forbidden"
               ? 502
-              : error.code === "validation_error" || error.code === "confirmation_required" || error.code === "invalid_amount"
+              : error.code === "validation_error" ||
+                  error.code === "confirmation_required" ||
+                  error.code === "invalid_amount" ||
+                  error.code === "custody_reference_invalid" ||
+                  error.code === "lombard_without_collateral"
                 ? 400
                 : 409;
   res.status(status).json({ error: { code: error.code, message: error.message } });
@@ -406,6 +410,29 @@ sponsumRouter.post("/capital/needs/:id/confirm", (req, res) => {
 
 sponsumRouter.post("/capital/needs/:id/lending", (req, res) => {
   handle(() => sponsumService.requestCapitalNeedLoan(req.params.id, { confirm: req.body?.confirm === true }), res);
+});
+
+// Lombard credit (O12, movena-suite docs/architecture/frappe-lending-lombard.md)
+sponsumRouter.get("/lombard", (_req, res) => {
+  handle(() => sponsumService.lombardOverview(), res);
+});
+
+sponsumRouter.post("/lombard", (req, res) => {
+  handle(
+    () =>
+      sponsumService.requestLombard({
+        customer_id: req.body?.customer_id,
+        amount: req.body?.amount,
+        pledges: req.body?.pledges,
+        custody_ref: req.body?.custody_ref,
+        confirm: req.body?.confirm === true
+      }),
+    res
+  );
+});
+
+sponsumRouter.get("/lombard/:id", (req, res) => {
+  handle(() => sponsumService.lombardStatus(req.params.id), res);
 });
 
 sponsumRouter.get("/lending/customers", (_req, res) => {
