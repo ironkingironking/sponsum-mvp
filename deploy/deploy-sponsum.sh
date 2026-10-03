@@ -9,6 +9,8 @@ LOCK_APP="${LOCK_APP:-suite}"
 APPLY=0
 SKIP_LOCK="${SKIP_LOCK:-0}"
 INSTALL_NGINX="${INSTALL_NGINX:-1}"
+# SKIP_ENV=1: code-only deploy, leaves ${DEPLOY_PATH}/.env untouched (no defaults appended, no keys imported).
+SKIP_ENV="${SKIP_ENV:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -75,6 +77,10 @@ PY
 npm install --omit=dev --no-audit --no-fund
 
 mkdir -p '${DEPLOY_PATH}/data'
+if [[ '${SKIP_ENV}' == '1' ]]; then
+  test -f '${DEPLOY_PATH}/.env' || { echo "SKIP_ENV=1 but ${DEPLOY_PATH}/.env is missing" >&2; exit 1; }
+  echo "env=untouched (SKIP_ENV=1)"
+else
 if [[ ! -f '${DEPLOY_PATH}/.env' ]]; then
   cp '${REMOTE_RELEASE}/deploy/env.production.example' '${DEPLOY_PATH}/.env'
   SECRET=\$(python3 - <<'PY'
@@ -157,6 +163,7 @@ else:
 env_path.write_text(text)
 print("openai_env=imported")
 PY
+fi
 
 UNIT_DIR="\$HOME/.config/systemd/user"
 mkdir -p "\$UNIT_DIR"
