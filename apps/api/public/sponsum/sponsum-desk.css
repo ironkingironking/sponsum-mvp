@@ -228,6 +228,11 @@ button.linkish { background: none; color: var(--brand); padding: 0; font-weight:
 .check-no { color: var(--danger); }
 
 .error { color: var(--danger); }
+
+/* Due dates: past = amber text with ▲ (not colour alone), today = emphasis. */
+.due-overdue { color: var(--warn); font-weight: 600; white-space: nowrap; }
+.due-today { font-weight: 600; white-space: nowrap; }
+
 .mono { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
 
 .note {

@@ -138,16 +138,28 @@ function formatDate(iso) {
   return `${dd}.${mm}.${d.getFullYear()}`;
 }
 
-function daysLeft(date) {
+// Calendar days from today to the due date; negative when the date has passed.
+function daysUntil(date) {
   const match = String(date).match(/^(\d{4})-(\d{2})-(\d{2})/);
   const end = match ? Date.UTC(+match[1], +match[2] - 1, +match[3]) : Date.parse(date);
-  if (!Number.isFinite(end)) return 0;
+  if (!Number.isFinite(end)) return null;
   const start = Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
-  return Math.max(0, Math.round((end - start) / 86400000));
+  return Math.round((end - start) / 86400000);
 }
 
-function formatDue(iso) {
-  return `${formatDate(iso)} (${daysLeft(iso)} Tage)`;
+// Settled receivables keep their date but are no longer "überfällig".
+const DUE_SETTLED = new Set(["PAID", "CLOSED", "CANCELLED", "WITHDRAWN"]);
+
+function formatDue(iso, status) {
+  const date = formatDate(iso);
+  const days = iso ? daysUntil(iso) : null;
+  if (days == null || DUE_SETTLED.has(String(status || ""))) return date;
+  if (days < 0) {
+    const overdue = -days;
+    return `${date} <span class="due-overdue">(<span aria-hidden="true">▲ </span>${overdue} ${overdue === 1 ? "Tag" : "Tage"} überfällig)</span>`;
+  }
+  if (days === 0) return `${date} <span class="due-today">(heute fällig)</span>`;
+  return `${date} (in ${days} ${days === 1 ? "Tag" : "Tagen"})`;
 }
 
 function formatIban(iban) {
@@ -845,7 +857,7 @@ function renderAssetTable(rows, title, total) {
               <td>${badge(row.status)}</td>
               <td class="num">${row.verification_score}/100</td>
               <td>${row.risk_class}</td>
-              <td>${formatDue(row.maturity_date)}</td>
+              <td>${formatDue(row.maturity_date, row.status)}</td>
             </tr>`
                   )
                   .join("")
@@ -971,7 +983,7 @@ async function renderDossier(id) {
       <section class="card">
         <h2>Beträge</h2>
         <p>Nominal ${formatChf(asset.nominal_amount, asset.currency)}<br>Akzeptiert ${formatChf(asset.accepted_amount, asset.currency)}<br>Bestritten ${formatChf(asset.disputed_amount, asset.currency)}<br>Offen ${formatChf(asset.outstanding_amount, asset.currency)}</p>
-        <p>Fällig ${formatDue(asset.maturity_date)}</p>
+        <p>Fällig ${formatDue(asset.maturity_date, asset.status)}</p>
         <p class="mono">Hash ${asset.content_hash.slice(0, 24)}…</p>
       </section>
     </div>
@@ -2722,7 +2734,7 @@ function renderRisk() {
                 <td>${row.risk_class}</td>
                 <td class="num">${row.verification_score}/100</td>
                 <td class="num">${formatChf(row.disputed_amount)}</td>
-                <td>${formatDue(row.maturity_date)}</td>
+                <td>${formatDue(row.maturity_date, row.status)}</td>
                 <td>${labelOf(row.instrument_type)}</td>
               </tr>`
             )
