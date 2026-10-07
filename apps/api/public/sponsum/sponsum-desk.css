@@ -233,6 +233,18 @@ button.linkish { background: none; color: var(--brand); padding: 0; font-weight:
 .due-overdue { color: var(--warn); font-weight: 600; white-space: nowrap; }
 .due-today { font-weight: 600; white-space: nowrap; }
 
+/* App links (IDs in tables, "Alle anzeigen" …): brand colour without the browser
+   default underline. :where() keeps this below .btn, .tabs a and .sp-rail a. */
+:where(.sp-main) a {
+  color: var(--brand);
+  font-weight: 600;
+  text-decoration: none;
+}
+:where(.sp-main) a:where(:hover) {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .mono { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
 
 .note {
