@@ -5,15 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Sponsum · Movena Suite</title>
     <link rel="icon" href="/favicon.ico?v=20260815-1" sizes="any" />
-    <link rel="stylesheet" href="/sponsum/sponsum-desk.css?v=20261007-ux" />
+    <link rel="stylesheet" href="/sponsum/sponsum-desk.css?v=20261008-ux2" />
   </head>
   <body class="sp-app">
     <div class="sp-shell">
-      <aside class="sp-rail" aria-label="Sponsum">
-        <a class="sp-back" href="/">← Suite</a>
-        <div class="sp-mark">SP</div>
-        <p class="sp-brand">Sponsum</p>
-        <nav>
+      <aside class="sp-rail" id="sp-rail" aria-label="Sponsum">
+        <a class="sp-back" href="/work-hub/">Zurück zur Suite</a>
+        <div class="sp-head">
+          <div class="sp-brand"><span class="sp-mark" aria-hidden="true">M</span><span>Sponsum</span></div>
+          <button type="button" class="sp-menu-toggle" aria-expanded="false" aria-controls="sp-nav">Menü</button>
+        </div>
+        <nav id="sp-nav" aria-label="Sponsum-Navigation">
           <a href="#/hub" data-nav="hub">Überblick</a>
           <a href="#/receivables" data-nav="receivables">Forderungen</a>
           <a href="#/zession" data-nav="zession">Zession</a>
@@ -33,6 +35,6 @@
       </aside>
       <main class="sp-main" id="sp-main"></main>
     </div>
-    <script src="/sponsum/sponsum-desk.js?v=20261007-ux"></script>
+    <script src="/sponsum/sponsum-desk.js?v=20261008-ux2"></script>
   </body>
 </html>

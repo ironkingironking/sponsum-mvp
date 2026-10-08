@@ -45,7 +45,8 @@ if [[ "$SKIP_LOCK" != "1" ]]; then
   trap cleanup_lock EXIT
 fi
 
-SUITE_APPS="${SUITE_APPS:-/home/ironking/Documents/Movena Suite/apps.json}"
+# SUITE_APPS= (set but empty) skips the apps.json copy; unset keeps the old default.
+SUITE_APPS="${SUITE_APPS-/home/ironking/Documents/Movena Suite/apps.json}"
 rsync -az --delete \
   --exclude node_modules \
   --exclude .env \

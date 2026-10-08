@@ -168,17 +168,25 @@ function formatIban(iban) {
   return compact.replace(/(.{4})/g, "$1 ").trim();
 }
 
+// Border badge with symbol (Suite standard): ■ only for real faults, ▲ for open points
+// and restrictions such as disputes, ● for done/OK, ○ for neutral states.
+const BADGE_SYMBOLS = { ok: "●", warn: "▲", danger: "■", "": "○" };
+
 function badge(status) {
   const code = String(status || "");
-  const danger = /DISPUTE|DEFAULT|FAILED|DENIED|DENY|MISMATCH/.test(code);
-  const warn = /VERIFIED|PENDING|FLAG|OFFER|LOCK|ISSUED|SEEN/.test(code);
+  const danger = /DEFAULT|FAILED|DENIED|MISMATCH/.test(code);
+  const warn = /DISPUTE|VERIFIED|PENDING|FLAG|OFFER|(?:^|_)LOCK|ISSUED|SEEN/.test(code);
   const ok = /ACCEPTED|COMPLETED|TRANSFERRED|CONFIRMED|PASSED|ALLOW|EFFECTIVE|PAID/.test(code);
   const cls = danger ? "danger" : warn ? "warn" : ok ? "ok" : "";
-  return `<span class="badge ${cls}" title="${code}"><span class="visually-hidden">Status: </span>${labelOf(code)}</span>`;
+  return `<span class="badge ${cls}"><span class="badge-sym" aria-hidden="true">${BADGE_SYMBOLS[cls]}</span><span class="visually-hidden">Status: </span>${labelOf(code)}</span>`;
 }
 
+// Jurisdiction rules: «Gesperrt» is a deliberate rule, so it stays neutral (no red).
+const POLICY_SYMBOLS = { ALLOW: "●", FLAG: "▲", DENY: "⚿" };
+
 function policyBadge(value) {
-  return `<span class="badge ${String(value).toLowerCase()}"><span class="visually-hidden">Regel: </span>${labelOf(value)}</span>`;
+  const code = String(value || "");
+  return `<span class="badge ${code.toLowerCase()}"><span class="badge-sym" aria-hidden="true">${POLICY_SYMBOLS[code] || "○"}</span><span class="visually-hidden">Regel: </span>${labelOf(code)}</span>`;
 }
 
 function emptyRow(cols, text) {
@@ -332,7 +340,26 @@ function setNav() {
   document.querySelectorAll("[data-nav]").forEach((link) => {
     link.classList.toggle("is-active", link.getAttribute("data-nav") === key);
   });
+  setMenuOpen(false);
 }
+
+// Narrow screens: the rail is a top bar and the navigation opens behind «Menü».
+const rail = document.getElementById("sp-rail");
+const menuToggle = rail?.querySelector(".sp-menu-toggle");
+
+function setMenuOpen(open) {
+  if (!rail || !menuToggle) return;
+  rail.classList.toggle("is-open", open);
+  menuToggle.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+menuToggle?.addEventListener("click", () => setMenuOpen(!rail.classList.contains("is-open")));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && rail?.classList.contains("is-open")) {
+    setMenuOpen(false);
+    menuToggle.focus();
+  }
+});
 
 async function route() {
   setNav();
@@ -845,8 +872,12 @@ function renderHub() {
       </section>
       <section class="card">
         <h2>Regulatorische Grenzen</h2>
-        <p>Kein Escrow, kein Orderbuch, keine anteiligen Token, kein automatischer Kauf, kein gesetzlicher Wechsel ohne Freigabe.</p>
-        <p>${policyBadge(workspace.policies.CH.sponsum_holds_funds)} Kundengelder &nbsp; ${policyBadge(workspace.policies.CH.legal_bill_of_exchange)} Wechsel &nbsp; ${policyBadge(workspace.policies.CH.auto_buy)} Autokauf</p>
+        <p>Sponsum verwahrt keine Kundengelder, ist keine Börse, teilt Forderungen nicht in Anteile auf, kauft nichts automatisch und stellt Wechsel nur nach Freigabe aus.</p>
+        <p class="policy-pairs">
+          <span>Kundengelder ${policyBadge(workspace.policies.CH.sponsum_holds_funds)}</span>
+          <span>Wechsel ${policyBadge(workspace.policies.CH.legal_bill_of_exchange)}</span>
+          <span>Automatischer Kauf ${policyBadge(workspace.policies.CH.auto_buy)}</span>
+        </p>
       </section>
     </div>
     ${renderAssetTable(workspace.receivables.slice(0, 6), "Aktuelle Forderungen", workspace.receivables.length)}
@@ -1110,7 +1141,7 @@ async function renderDossier(id) {
       <p>Registerzeilen: ${dossier.registry.map((row) => `${row.status} ${row.transferor_party_id} → ${row.transferee_party_id || "–"}`).join("; ") || "keine"}</p>
       <p>Bitcredit ${dossier.adapters.bitcredit.ok ? dossier.adapters.bitcredit.ref : dossier.adapters.bitcredit.reason}</p>
       <p>Registerwertrecht ${dossier.adapters.register_right.ok ? dossier.adapters.register_right.ref : dossier.adapters.register_right.reason}</p>
-      <p>LEGAL_BILL_OF_EXCHANGE ${policyBadge("DENY")} · Aval-als-Wechsel ${policyBadge("DENY")}</p>
+      <p>${labelOf("LEGAL_BILL_OF_EXCHANGE")} ${policyBadge("DENY")} · Aval als Wechselaval ${policyBadge("DENY")}</p>
     </section>
     <section class="card">
       <h2>Resolve / Enforcement</h2>
@@ -1918,7 +1949,7 @@ function renderCapital() {
 function renderMarket() {
   main.innerHTML = `
     <h1>Marktplatz</h1>
-    <p class="lead">Kein zentrales Orderbuch. Die öffentliche Liste zeigt nur anonymisierte Angaben. Weitere Daten nach Freigabe.</p>
+    <p class="lead">Sponsum ist keine Börse: Käufer und Verkäufer schliessen jedes Angebot einzeln ab. Die öffentliche Liste zeigt nur anonymisierte Angaben. Weitere Daten nach Freigabe.</p>
     ${errorLine()}
     <section class="card">
       <h2>Öffentliche Angebote</h2>
@@ -2763,6 +2794,22 @@ function renderRisk() {
   `;
 }
 
+const POLICY_FEATURE_LABELS = {
+  ordinary_assignment: "Gewöhnliche Zession",
+  silent_factoring: "Stilles Factoring",
+  open_factoring: "Offenes Factoring",
+  marketplace_p2p: "Marktplatz zwischen Firmen",
+  factor_rfq: "Offertanfrage an Factoring-Anbieter",
+  auto_buy: "Automatischer Kauf",
+  fractional_tokens: "Forderungen in Anteilen",
+  sponsum_holds_funds: "Kundengelder bei Sponsum",
+  register_rights: "Registerwertrechte",
+  legal_bill_of_exchange: "Gesetzlicher Wechsel",
+  bitcredit: "Bitcredit (elektronischer Wechsel)",
+  endorsement_recourse: "Indossament mit Regress",
+  aval_as_wechselaval: "Aval als Wechselaval"
+};
+
 function renderPolicy() {
   const rows = Object.entries(workspace.policies);
   const features = Object.keys(workspace.policies.CH);
@@ -2771,10 +2818,10 @@ function renderPolicy() {
     <p class="lead">Funktionen sind je Land erlaubt, gekennzeichnet oder gesperrt. Wechsel, Aval und Bitcredit gelten nicht automatisch als rechtsgültig.</p>
     <section class="card">
       <table>
-        <thead><tr><th>Feature</th>${rows.map(([code]) => `<th>${code}</th>`).join("")}</tr></thead>
+        <thead><tr><th>Funktion</th>${rows.map(([code]) => `<th>${code}</th>`).join("")}</tr></thead>
         <tbody>
           ${features
-            .map((feature) => `<tr><td>${feature}</td>${rows.map(([, policy]) => `<td>${policyBadge(policy[feature])}</td>`).join("")}</tr>`)
+            .map((feature) => `<tr><td>${esc(POLICY_FEATURE_LABELS[feature] || feature.replaceAll("_", " "))}</td>${rows.map(([, policy]) => `<td>${policyBadge(policy[feature])}</td>`).join("")}</tr>`)
             .join("")}
         </tbody>
       </table>
