@@ -153,3 +153,19 @@ export function setRecordReaders(store: Store, kind: string, recordId: string, r
   raw!.replace(full);
   return { record_id: recordId, readers: row._suite_access.readers };
 }
+
+/**
+ * Global uniqueness checks (DK-31): true when any row of `kind` in the whole store, across all tenants, matches.
+ * Only the boolean leaves this function, so a caller learns that a duplicate exists, never whose it is.
+ */
+export function existsGlobally(store: Store, kind: string, predicate: (row: Row) => boolean): boolean {
+  const raw = originals.get(store) ?? store;
+  const full: State = raw.snapshot();
+  return rows(full, kind).some((row) => {
+    try {
+      return predicate(row);
+    } catch {
+      return false;
+    }
+  });
+}

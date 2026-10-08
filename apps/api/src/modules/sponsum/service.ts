@@ -1,5 +1,5 @@
 import { principal } from "./access-context.js";
-import { secureStore, setRecordReaders } from "./scoped-store.js";
+import { existsGlobally, secureStore, setRecordReaders } from "./scoped-store.js";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import http from "node:http";
@@ -129,6 +129,8 @@ export type CreateReceivableInput = {
   jurisdiction?: string;
   evidence?: VerificationEvidence;
   payee_iban?: string;
+  /** ERPNext Sales Invoice (docstatus 1, outstanding > 0); only accepted through submitReceivable. */
+  sales_invoice?: string;
 };
 
 export type SettlementWebhookInput = {
@@ -168,14 +170,36 @@ export class SponsumService {
     assertInstrumentAllowed(jurisdiction, instrument);
 
     const state = this.store.snapshot();
+    const tenant = input.origin_tenant_id ?? "tenant-movena";
     const dup = state.assets.find(
       (asset) =>
-        asset.origin_tenant_id === (input.origin_tenant_id ?? "tenant-movena") &&
+        asset.origin_tenant_id === tenant &&
         asset.invoice_id === input.invoice_id &&
         !asset.parent_receivable_id
     );
-    if (dup) {
-      throw new DomainError("duplicate_invoice", "A receivable already exists for this invoice");
+    // DK-31: the same invoice of the same creditor (or the same ERPNext Sales Invoice) exists at most once across all
+    // tenants, otherwise it could be sold or financed twice. Tenant-local placeholder parties stay tenant-scoped.
+    const creditorKey = creditorIdentity(input.creditor_party_id, tenant);
+    const invoiceKey = normalizedInvoiceNo(input.invoice_id);
+    const salesInvoice = normalizedInvoiceNo(input.sales_invoice ?? "");
+    const globalDup = existsGlobally(this.store, "assets", (asset) => {
+      if (asset.parent_receivable_id) return false;
+      const assetSalesInvoice = normalizedInvoiceNo(asset.sales_invoice ?? "");
+      if (salesInvoice && (assetSalesInvoice === salesInvoice || normalizedInvoiceNo(asset.invoice_id) === salesInvoice)) {
+        return true;
+      }
+      if (assetSalesInvoice && assetSalesInvoice === invoiceKey) return true;
+      return (
+        Boolean(invoiceKey) &&
+        normalizedInvoiceNo(asset.invoice_id) === invoiceKey &&
+        creditorIdentity(asset.creditor_party_id, asset.origin_tenant_id) === creditorKey
+      );
+    });
+    if (dup || globalDup) {
+      throw new DomainError(
+        "duplicate_invoice",
+        "Für diese Rechnung besteht bereits eine Forderung (auch in einem anderen Mandanten möglich). Eine Rechnung kann nur einmal verkauft oder finanziert werden."
+      );
     }
 
     const now = new Date().toISOString();
@@ -3270,6 +3294,23 @@ function normalizeCapitalKind(value: string): CapitalKind {
   if (raw === "SHORT_DEBT" || raw === "KURZ" || raw === "SHORT") return "SHORT_DEBT";
   if (raw === "LONG_DEBT" || raw === "LANG" || raw === "LONG") return "LONG_DEBT";
   throw new DomainError("invalid_capital", "Nur Eigenkapital, kurzfristiges oder langfristiges Fremdkapital.");
+}
+
+/** Invoice numbers compare without case and surrounding/inner whitespace. */
+function normalizedInvoiceNo(value: string): string {
+  return String(value ?? "").trim().replace(/\s+/g, "").toUpperCase();
+}
+
+/**
+ * Creditor identity for the global duplicate check: ERPNext parties (`customer:`/`company:`) and Swiss UIDs are global;
+ * other ids (desk placeholders such as `seller-ui`) only mean something inside their tenant.
+ */
+function creditorIdentity(partyId: string, tenantId: string): string {
+  const id = String(partyId ?? "").trim();
+  const uid = id.toUpperCase().replace(/[^A-Z0-9]/g, "").match(/CHE(\d{9})/);
+  if (uid) return `uid:CHE${uid[1]}`;
+  if (/^(customer|company):/i.test(id)) return id.toLowerCase();
+  return `${tenantId}\u0000${id.toLowerCase()}`;
 }
 
 function daysBetween(from: string, to: string): number {

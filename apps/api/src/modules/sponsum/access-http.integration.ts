@@ -32,7 +32,10 @@ test("shipped HTTP API isolates users and tenants before side effects or downloa
     assert.equal((await call("/receivables", alice, { ...input, _suite_access: { owner_id: "bob" } })).status, 403);
     const response = await call("/receivables", alice, input);
     assert.equal(response.status, 200); const a = await response.json() as any;
-    const createdB = await call("/receivables", bob, input); assert.equal(createdB.status, 200);
+    // DK-31: the same invoice of the same creditor exists once, even if bob cannot see alice's receivable.
+    const duplicateB = await call("/receivables", bob, input); assert.equal(duplicateB.status, 409);
+    assert.equal(((await duplicateB.json()) as any).error.code, "duplicate_invoice");
+    const createdB = await call("/receivables", bob, { ...input, invoice_id: "ACCESS-TEST-B" }); assert.equal(createdB.status, 200);
     const createdOther = await call("/receivables", other, input); assert.equal(createdOther.status, 200);
     assert.equal(((await (await call("/receivables", alice)).json()) as any[]).length, 1);
     assert.equal((await call(`/receivables/${a.receivable_id}/dossier`, bob)).status, 404);

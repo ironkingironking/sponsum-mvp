@@ -147,6 +147,8 @@ export type ReceivableAsset = {
   debtor_party_id: string;
   current_holder_party_id: string;
   invoice_id: string;
+  /** ERPNext Sales Invoice this receivable is derived from; amounts and due date then come from ERPNext. */
+  sales_invoice?: string | null;
   content_hash: string;
   verification_score: number;
   risk_class: string;
