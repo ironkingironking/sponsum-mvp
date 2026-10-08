@@ -1,5 +1,6 @@
 import { principal } from "./access-context.js";
 import { existsGlobally, secureStore, setRecordReaders } from "./scoped-store.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import http from "node:http";
@@ -70,6 +71,7 @@ import {
   type LendingDeps
 } from "./lending-bridge.js";
 import { assessJurisdiction } from "./jurisdiction-deadlines.js";
+import { readOpenSalesInvoice, validSalesInvoiceName, type OpenSalesInvoice } from "./erp-invoice.js";
 import { buildSimplePdf } from "./pdf.js";
 import { buildZip } from "./zip.js";
 import {
@@ -145,6 +147,12 @@ export type SettlementWebhookInput = {
 
 const EVENT_SECRET = "sponsum-node-event-secret";
 
+/**
+ * DK-31: Sales Invoices checked live in ERPNext for the step that is running (key: receivable_id, or
+ * `new:<invoice>` while a receivable is created). Steps that sell or finance a receivable refuse to run without it.
+ */
+const verifiedInvoices = new AsyncLocalStorage<Map<string, OpenSalesInvoice>>();
+
 export class SponsumService {
   constructor(private readonly store = new MemorySponsumStore()) { this.store = secureStore(store); }
 
@@ -157,11 +165,83 @@ export class SponsumService {
 
   shareReadAccess(kind: string, id: string, readers: unknown) { return setRecordReaders(this.store, kind, id, readers); }
 
+  /**
+   * Route entry for "Neue Forderung" (DK-31). With `sales_invoice` ERPNext is read first; amount, currency, dates and
+   * debtor then come from the open Sales Invoice, never from the request.
+   */
+  async submitReceivable(input: CreateReceivableInput): Promise<ReceivableAsset> {
+    const body = { ...(input ?? {}) } as CreateReceivableInput;
+    if (body.sales_invoice === undefined || body.sales_invoice === null || String(body.sales_invoice).trim() === "") {
+      delete body.sales_invoice;
+      return this.createReceivable(body);
+    }
+    const invoice = await readOpenSalesInvoice(String(body.sales_invoice), this.lendingDeps());
+    return verifiedInvoices.run(new Map([[`new:${invoice.name}`, invoice]]), () =>
+      this.createReceivable({ ...body, sales_invoice: invoice.name })
+    );
+  }
+
+  /**
+   * DK-31: runs `step` after a live ERPNext check of the receivable's Sales Invoice. Receivables without a linked
+   * invoice run unchanged. Offer, sale, assignment and the capital-need confirmation call checkedInvoice().
+   */
+  async withCheckedInvoice<T>(receivableId: unknown, step: () => T | Promise<T>): Promise<T> {
+    const id = String(receivableId ?? "").trim();
+    const asset = this.store.snapshot().assets.find((row) => row.receivable_id === id);
+    if (!asset?.sales_invoice) return step();
+    const invoice = await readOpenSalesInvoice(asset.sales_invoice, this.lendingDeps());
+    const checked = new Map(verifiedInvoices.getStore() ?? []);
+    checked.set(asset.receivable_id, invoice);
+    return verifiedInvoices.run(checked, step);
+  }
+
+  /** Receivable behind a bid, so the route can check its invoice before the sale is accepted. */
+  receivableOfBid(bidId: string): string {
+    const state = this.store.snapshot();
+    const bid = state.bids.find((row) => row.bid_id === bidId);
+    const offer = bid ? state.offers.find((row) => row.offer_id === bid.offer_id) : undefined;
+    if (!offer) throw new DomainError("bid_not_open", "Bid is not open");
+    return offer.receivable_id;
+  }
+
+  /**
+   * The live-checked invoice of a linked receivable, or null without link. ERPNext leads: the open amount and due date
+   * follow the invoice (part payments, changed terms) before anything is sold or financed.
+   */
+  private checkedInvoice(asset: ReceivableAsset): OpenSalesInvoice | null {
+    if (!asset.sales_invoice) return null;
+    const invoice = verifiedInvoices.getStore()?.get(asset.receivable_id);
+    if (!invoice || invoice.name !== asset.sales_invoice) {
+      throw new DomainError(
+        "invoice_check_required",
+        "Die ERPNext-Rechnung dieser Forderung muss vor diesem Schritt live geprüft werden."
+      );
+    }
+    if (invoice.currency !== asset.currency) {
+      throw new DomainError("currency_mismatch", "Die Währung der ERPNext-Rechnung weicht von der Forderung ab.");
+    }
+    asset.outstanding_amount = invoice.outstanding_amount;
+    if (invoice.due_date) asset.maturity_date = invoice.due_date;
+    return invoice;
+  }
+
   createReceivable(input: CreateReceivableInput): ReceivableAsset {
     const who = principal();
     if (who) {
       if (input.origin_tenant_id && input.origin_tenant_id !== who.tenantId) throw new DomainError("forbidden", "Fremder Mandant.");
       input = { ...input, origin_tenant_id: who.tenantId };
+    }
+    let linked: OpenSalesInvoice | null = null;
+    if (input.sales_invoice !== undefined && input.sales_invoice !== null && String(input.sales_invoice) !== "") {
+      const name = validSalesInvoiceName(input.sales_invoice);
+      linked = verifiedInvoices.getStore()?.get(`new:${name}`) ?? null;
+      if (!linked) {
+        throw new DomainError(
+          "invoice_check_required",
+          "Eine Forderung aus einer ERPNext-Rechnung wird nur nach der Live-Prüfung in ERPNext angelegt."
+        );
+      }
+      input = fromSalesInvoice(input, linked);
     }
     assertNoSponsumFunds(false);
     assertNoFractionalTokens(false);
@@ -240,6 +320,7 @@ export class SponsumService {
       debtor_party_id: input.debtor_party_id,
       current_holder_party_id: input.creditor_party_id,
       invoice_id: input.invoice_id,
+      ...(linked ? { sales_invoice: linked.name } : {}),
       content_hash: publicClaimHash({
         invoiceId: input.invoice_id,
         debtorId: input.debtor_party_id,
@@ -498,6 +579,7 @@ export class SponsumService {
     if (input.seller_party_id !== asset.current_holder_party_id) {
       throw new DomainError("forbidden", "Only the current holder can offer the receivable");
     }
+    this.checkedInvoice(asset);
     const lock = mustLock(state, receivableId);
     const live = state.offers.filter((row) => row.receivable_id === receivableId && row.status === "LIVE");
     if (!canCreateSecondLiveOffer(live.length, lock.state) || asset.status === "OFFERED" || asset.status === "TRADE_LOCKED") {
@@ -633,6 +715,7 @@ export class SponsumService {
     if (!offer || offer.status !== "LIVE") throw new DomainError("offer_not_live", "Offer is not live");
     if (offer.seller_party_id !== sellerPartyId) throw new DomainError("forbidden", "Only seller can accept");
     const asset = mustAsset(state, offer.receivable_id);
+    this.checkedInvoice(asset);
     const lock = mustLock(state, asset.receivable_id);
     assertTransition(RECEIVABLE_TRANSITIONS, asset.status, "TRADE_LOCKED", "receivable");
     assertTransition(OFFER_TRANSITIONS, offer.status, "TRADED", "offer");
@@ -2310,6 +2393,7 @@ export class SponsumService {
     }
     const asset = state.assets.find((row) => row.receivable_id === receivableId);
     if (!asset) throw new DomainError("not_found", "Forderung nicht gefunden");
+    this.checkedInvoice(asset);
     try {
       assertLendable({ ...need, status: "CONFIRMED", receivable_id: asset.receivable_id }, asset);
     } catch (error) {
@@ -2347,7 +2431,22 @@ export class SponsumService {
     }
     let result;
     try {
-      result = await requestLoanApplication({ need, receivable: asset, confirm: input.confirm }, this.lendingDeps());
+      const deps = this.lendingDeps();
+      result = await requestLoanApplication(
+        {
+          need,
+          receivable: asset,
+          confirm: input.confirm,
+          // DK-31: before Lending gets a new application, the linked invoice must still be open in ERPNext; the loan
+          // can be at most what ERPNext still shows as outstanding.
+          refresh: async (receivable) => {
+            if (!asset.sales_invoice) return receivable;
+            const invoice = await readOpenSalesInvoice(asset.sales_invoice, deps);
+            return { ...receivable, currency: invoice.currency, outstanding_amount: invoice.outstanding_amount };
+          }
+        },
+        deps
+      );
     } catch (error) {
       throw lendingToDomain(error);
     }
@@ -3294,6 +3393,42 @@ function normalizeCapitalKind(value: string): CapitalKind {
   if (raw === "SHORT_DEBT" || raw === "KURZ" || raw === "SHORT") return "SHORT_DEBT";
   if (raw === "LONG_DEBT" || raw === "LANG" || raw === "LONG") return "LONG_DEBT";
   throw new DomainError("invalid_capital", "Nur Eigenkapital, kurzfristiges oder langfristiges Fremdkapital.");
+}
+
+/**
+ * DK-31: a receivable from an ERPNext Sales Invoice takes number, amount, currency, dates and debtor from ERPNext.
+ * A debtor or creditor that contradicts the invoice is refused instead of silently replaced.
+ */
+function fromSalesInvoice(input: CreateReceivableInput, invoice: OpenSalesInvoice): CreateReceivableInput {
+  const debtor = `customer:${invoice.customer}`;
+  const requestedDebtor = String(input.debtor_party_id ?? "").trim();
+  if (!invoice.customer || (/^customer:/i.test(requestedDebtor) && requestedDebtor.toLowerCase() !== debtor.toLowerCase())) {
+    throw new DomainError("invoice_party_mismatch", `Die ERPNext-Rechnung ${invoice.name} lautet auf einen anderen Kunden.`);
+  }
+  const creditor = String(input.creditor_party_id ?? "").trim();
+  if (
+    creditor.toLowerCase() === debtor.toLowerCase() ||
+    (/^company:/i.test(creditor) && invoice.company && creditor.toLowerCase() !== `company:${invoice.company}`.toLowerCase())
+  ) {
+    throw new DomainError("invoice_party_mismatch", `Die ERPNext-Rechnung ${invoice.name} gehört nicht diesem Gläubiger.`);
+  }
+  const evidence = input.evidence ?? { hasInvoice: true, unpaid: true, hasDispute: false };
+  return {
+    ...input,
+    invoice_id: invoice.name,
+    sales_invoice: invoice.name,
+    debtor_party_id: debtor,
+    currency: invoice.currency,
+    nominal_amount: invoice.grand_total,
+    accepted_amount:
+      input.accepted_amount !== undefined && Number(input.accepted_amount) <= Number(invoice.grand_total)
+        ? input.accepted_amount
+        : invoice.grand_total,
+    outstanding_amount: invoice.outstanding_amount,
+    issue_date: invoice.posting_date || input.issue_date,
+    maturity_date: invoice.due_date || input.maturity_date,
+    evidence: { ...evidence, hasInvoice: true, unpaid: true }
+  };
 }
 
 /** Invoice numbers compare without case and surrounding/inner whitespace. */

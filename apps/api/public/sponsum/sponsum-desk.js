@@ -891,7 +891,9 @@ function renderReceivables() {
         <h2>Neue Forderung aus Rechnung</h2>
         <form class="stack" id="create-form">
           <label>Rechnungsnummer <input name="invoice_id" required placeholder="z. B. RE-10482" value="${esc(invoicePrefill)}" /></label>
-          <label>Nominal <input name="nominal_amount" inputmode="decimal" required placeholder="0.00" /></label>
+          <label class="check"><input type="checkbox" name="from_erpnext" value="1" /> Gebuchte Rechnung aus ERPNext</label>
+          <p class="note">Mit ERPNext-Rechnung kommen Betrag, Währung, Fälligkeit und Kunde live aus ERPNext. Nur gebuchte, offene Rechnungen; vor Angebot, Verkauf und Kredit prüft Sponsum erneut.</p>
+          <label>Nominal <input name="nominal_amount" inputmode="decimal" placeholder="0.00 (bei ERPNext-Rechnung leer lassen)" /></label>
           ${
             (workspace.lendingCustomers || []).length
               ? `<label>Gläubiger
@@ -912,6 +914,27 @@ function renderReceivables() {
   document.getElementById("create-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.target).entries());
+    const fromErp = data.from_erpnext === "1";
+    delete data.from_erpnext;
+    if (fromErp) {
+      // DK-31: amount, currency, dates and customer come from the open Sales Invoice in ERPNext.
+      const invoice = String(data.invoice_id || "").trim();
+      act(
+        () =>
+          api("/receivables", {
+            method: "POST",
+            body: JSON.stringify({
+              invoice_id: invoice,
+              sales_invoice: invoice,
+              creditor_party_id: data.creditor_party_id || SELLER,
+              debtor_party_id: data.debtor_party_id,
+              evidence: { hasInvoice: true, unpaid: true, hasDispute: false, hasContract: true, invoiceElectronic: true }
+            })
+          }),
+        `Forderung aus der ERPNext-Rechnung ${invoice} anlegen? Betrag, Währung und Fälligkeit kommen aus ERPNext.`
+      );
+      return;
+    }
     if (!/^\d+([.']\d{3})*(?:\.\d{1,2})?$|^\d+(?:\.\d{1,2})?$/.test(String(data.nominal_amount).replace(/'/g, ""))) {
       lastError = "Bitte einen gültigen Betrag eingeben.";
       route();

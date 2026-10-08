@@ -56,6 +56,18 @@ Lending modelliert die ERPNext-Firma als Kreditgeberin. Ist die Forderung eine e
 
 Prüfung, Genehmigung, Auszahlung und Buchung laufen in Lending. Die Felder `movena_sponsum_*` gehen dabei per Mapping vom Antrag auf den Loan über; das liefert `movena_debtors` in Welle 2.
 
+## Forderungen aus ERPNext-Rechnungen (Audit DK-31, 2026-10-08)
+
+ERPNext bleibt System of Record der Rechnung. Eine Forderung kann mit `sales_invoice` aus einer Sales Invoice entstehen (Desk: «Gebuchte Rechnung aus ERPNext»):
+
+- **Anlage** (`POST /receivables` → `submitReceivable`): Sponsum liest die Rechnung live über den technischen Benutzer. Nur `docstatus = 1`, keine Gutschrift (`is_return`), `outstanding_amount > 0`. Betrag, Währung, Rechnungs- und Fälligkeitsdatum sowie der Kunde (Schuldner) kommen aus ERPNext, nicht aus der Anfrage. Widerspricht Schuldner oder Firma der Rechnung → `invoice_party_mismatch`.
+- **Erneute Prüfung** vor jedem Schritt, der verkauft oder finanziert: Angebot, Liquiditätsanfrage und -annahme, Gebotsannahme, Zession, Bestätigung des Kapitalbedarfs und Kreditantrag. Der offene Betrag und die Fälligkeit folgen dabei ERPNext (Teilzahlungen). Ohne Live-Prüfung verweigern diese Schritte mit `invoice_check_required`.
+- **Fehler:** `invoice_not_open` (Entwurf, storniert, bezahlt, Gutschrift), `invoice_not_found` (404), `erp_unavailable` (503, Anbindung fehlt oder verweigert; fail-closed).
+- **Eindeutigkeit:** Dieselbe Rechnung desselben Gläubigers und dieselbe Sales Invoice gibt es über alle Mandanten höchstens einmal (`duplicate_invoice`).
+- **Rechte:** Der technische Benutzer braucht dafür zusätzlich **Lesezugriff auf Sales Invoice** (O8).
+
+Forderungen ohne `sales_invoice` (z. B. Rechnungen von Kunden, die nicht in ERPNext liegen) bleiben manuell erfasst.
+
 ## Status (read-only)
 
 `readLendingStatus(receivableId, deps)` liefert drei Fälle:
@@ -113,6 +125,6 @@ Stabil, Meldungen auf Deutsch.
    - Verwahr-Referenz: Private Schlüssel, Seeds und Hex-Schlüssel werden abgelehnt. In Lending kommt die Referenz in „Reference No“ der Loan Security Assignment.
    - Desk-Smoke: `node e2e/lombard-desk.mjs` (Headless-Chromium, API simuliert).
 
-Noch offen für den Live-Betrieb: Kreditprodukt und Konten (O1), technischer Benutzer mit `Loan LOS User` + `Loan Reporter` + Lesezugriff auf Customer sowie die `MOVENA_LENDING_*`-Variablen in der `.env` des Dienstes (O8). Beides richtet ein Mensch ein.
+Noch offen für den Live-Betrieb: Kreditprodukt und Konten (O1), technischer Benutzer mit `Loan LOS User` + `Loan Reporter` + Lesezugriff auf Customer und Sales Invoice sowie die `MOVENA_LENDING_*`-Variablen in der `.env` des Dienstes (O8). Beides richtet ein Mensch ein.
 
 Test: `node --import tsx --test apps/api/src/modules/sponsum/lending-bridge.test.ts`, oder `npm test`.

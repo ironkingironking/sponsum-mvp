@@ -10,6 +10,8 @@ export type LendingMock = LendingTransport & {
   docs: Map<string, LendingDoc[]>;
   calls: Array<{ op: "list" | "get" | "insert"; doctype: string }>;
   addCustomer(name: string): void;
+  /** ERPNext Sales Invoice as the technical user reads it (DK-31 live check). */
+  addSalesInvoice(doc: LendingDoc): void;
   /** O12: a security with its type (haircut/LTV) and optionally a price valid in [from, upto]. */
   addSecurity(code: string, type: string, ltv: number, price?: number, valid?: { from: string; upto: string }): void;
   addShortfall(loan: string, shortfallAmount: number, securityValue: number): void;
@@ -109,6 +111,12 @@ export function createLendingMock(): LendingMock {
     },
     addCustomer(name) {
       table("Customer").push({ name, customer_name: name, docstatus: 0, disabled: 0 });
+    },
+    addSalesInvoice(doc) {
+      const rows = table("Sales Invoice");
+      const index = rows.findIndex((row) => row.name === doc.name);
+      if (index >= 0) rows[index] = { ...rows[index], ...doc };
+      else rows.push({ docstatus: 1, is_return: 0, currency: "CHF", ...doc });
     },
     approveAndCreateLoan(applicationName, schedule = []) {
       const application = table("Loan Application").find((doc) => doc.name === applicationName);

@@ -326,7 +326,13 @@ async function existingForReceivable(
  * the receivable (idempotent). Rate, schedule and accounts come from the Loan Product in Lending, never from Sponsum.
  */
 export async function requestLoanApplication(
-  input: { need: LendableCapitalNeed; receivable: LendableReceivable; confirm?: boolean },
+  input: {
+    need: LendableCapitalNeed;
+    receivable: LendableReceivable;
+    confirm?: boolean;
+    /** Re-reads what ERPNext leads (open invoice, outstanding amount) right before a new application is created. */
+    refresh?: (receivable: LendableReceivable) => Promise<LendableReceivable>;
+  },
   deps: LendingDeps
 ): Promise<LoanApplicationResult> {
   if (input.confirm !== true) {
@@ -346,7 +352,8 @@ export async function requestLoanApplication(
     return { created: false, loan_application: name, loan: null, deep_link: deskLink(config, "loan-application", name), source: "LENDING · Loan Application" };
   }
 
-  const customer = assertLendable(input.need, input.receivable);
+  const receivable = input.refresh ? await input.refresh(input.receivable) : input.receivable;
+  const customer = assertLendable(input.need, receivable);
   if (!(await transport.get("Customer", customer))) {
     throw new LendingError("customer_not_found", `Kunde ${customer} existiert in ERPNext nicht.`);
   }

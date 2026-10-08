@@ -10,31 +10,31 @@ sponsumRouter.post("/access/:kind/:id", (req, res) => {
   handle(() => sponsumService.shareReadAccess(req.params.kind, req.params.id, req.body?.readers), res);
 });
 
+const DOMAIN_STATUS: Record<string, number> = {
+  not_found: 404,
+  invoice_not_found: 404,
+  forbidden: 403,
+  kyc_required: 403,
+  policy_denied: 403,
+  skribble_quality_downgraded: 403,
+  skribble_not_configured: 503,
+  skribble_unreachable: 503,
+  lending_not_configured: 503,
+  lending_unreachable: 503,
+  erp_unavailable: 503,
+  lending_forbidden: 502,
+  validation_error: 400,
+  confirmation_required: 400,
+  invalid_amount: 400,
+  custody_reference_invalid: 400,
+  lombard_without_collateral: 400
+};
+
 function sendDomainError(error: unknown, res: import("express").Response): boolean {
   if (!(error instanceof DomainError)) {
     return false;
   }
-  const status =
-    error.code === "not_found"
-      ? 404
-      : error.code === "forbidden" || error.code === "kyc_required"
-        ? 403
-        : error.code === "policy_denied" || error.code === "skribble_quality_downgraded"
-          ? 403
-          : error.code === "skribble_not_configured" ||
-              error.code === "skribble_unreachable" ||
-              error.code === "lending_not_configured" ||
-              error.code === "lending_unreachable"
-            ? 503
-            : error.code === "lending_forbidden"
-              ? 502
-              : error.code === "validation_error" ||
-                  error.code === "confirmation_required" ||
-                  error.code === "invalid_amount" ||
-                  error.code === "custody_reference_invalid" ||
-                  error.code === "lombard_without_collateral"
-                ? 400
-                : 409;
+  const status = Object.hasOwn(DOMAIN_STATUS, error.code) ? DOMAIN_STATUS[error.code] : 409;
   res.status(status).json({ error: { code: error.code, message: error.message } });
   return true;
 }
@@ -202,15 +202,17 @@ sponsumRouter.get("/assignments/:id", (req, res) => {
 sponsumRouter.post("/assignments", (req, res) => {
   handle(
     () =>
-      sponsumService.createAssignment({
-        receivable_id: String(req.body.receivable_id),
-        seller_party_id: String(req.body.seller_party_id ?? "seller-ui"),
-        buyer_party_id: String(req.body.buyer_party_id),
-        purchase_price: String(req.body.purchase_price),
-        factoring_mode: req.body.factoring_mode,
-        notice_mode: req.body.notice_mode,
-        payee_iban: req.body.payee_iban
-      }),
+      sponsumService.withCheckedInvoice(req.body.receivable_id, () =>
+        sponsumService.createAssignment({
+          receivable_id: String(req.body.receivable_id),
+          seller_party_id: String(req.body.seller_party_id ?? "seller-ui"),
+          buyer_party_id: String(req.body.buyer_party_id),
+          purchase_price: String(req.body.purchase_price),
+          factoring_mode: req.body.factoring_mode,
+          notice_mode: req.body.notice_mode,
+          payee_iban: req.body.payee_iban
+        })
+      ),
     res
   );
 });
@@ -315,7 +317,7 @@ sponsumRouter.post("/wechsel-drafts/:id/default", (req, res) => {
 });
 
 sponsumRouter.post("/receivables", (req, res) => {
-  handle(() => sponsumService.createReceivable(req.body), res);
+  handle(() => sponsumService.submitReceivable(req.body), res);
 });
 
 sponsumRouter.get("/receivables/:id", (req, res) => {
@@ -335,22 +337,27 @@ sponsumRouter.post("/receivables/:id/disputes", (req, res) => {
 });
 
 sponsumRouter.post("/receivables/:id/offers", (req, res) => {
-  handle(() => sponsumService.createOffer(req.params.id, req.body), res);
+  handle(() => sponsumService.withCheckedInvoice(req.params.id, () => sponsumService.createOffer(req.params.id, req.body)), res);
 });
 
 sponsumRouter.post("/receivables/:id/liquidity", (req, res) => {
-  handle(() => sponsumService.requestLiquidity(req.params.id, req.body.seller_party_id), res);
+  handle(
+    () => sponsumService.withCheckedInvoice(req.params.id, () => sponsumService.requestLiquidity(req.params.id, req.body.seller_party_id)),
+    res
+  );
 });
 
 sponsumRouter.post("/receivables/:id/liquidity/accept", (req, res) => {
   handle(
     () =>
-      sponsumService.acceptLiquidityQuote(
-        req.params.id,
-        String(req.body.seller_party_id),
-        String(req.body.buyer_party_id),
-        String(req.body.amount),
-        req.body.payee_iban
+      sponsumService.withCheckedInvoice(req.params.id, () =>
+        sponsumService.acceptLiquidityQuote(
+          req.params.id,
+          String(req.body.seller_party_id),
+          String(req.body.buyer_party_id),
+          String(req.body.amount),
+          req.body.payee_iban
+        )
       ),
     res
   );
@@ -400,10 +407,12 @@ sponsumRouter.post("/capital/needs/:id/withdraw", (req, res) => {
 sponsumRouter.post("/capital/needs/:id/confirm", (req, res) => {
   handle(
     () =>
-      sponsumService.confirmCapitalNeed(req.params.id, {
-        receivable_id: req.body?.receivable_id,
-        confirm: req.body?.confirm === true
-      }),
+      sponsumService.withCheckedInvoice(req.body?.receivable_id, () =>
+        sponsumService.confirmCapitalNeed(req.params.id, {
+          receivable_id: req.body?.receivable_id,
+          confirm: req.body?.confirm === true
+        })
+      ),
     res
   );
 });
@@ -460,7 +469,13 @@ sponsumRouter.post("/bids/:id/counter", (req, res) => {
 });
 
 sponsumRouter.post("/bids/:id/accept", (req, res) => {
-  handle(() => sponsumService.acceptBid(req.params.id, req.body.seller_party_id, req.body.payee_iban), res);
+  handle(
+    () =>
+      sponsumService.withCheckedInvoice(sponsumService.receivableOfBid(req.params.id), () =>
+        sponsumService.acceptBid(req.params.id, req.body.seller_party_id, req.body.payee_iban)
+      ),
+    res
+  );
 });
 
 sponsumRouter.get("/trades/:id", (req, res) => {
