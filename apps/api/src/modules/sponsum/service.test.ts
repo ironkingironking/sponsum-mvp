@@ -79,7 +79,8 @@ test("bid accept creates trade + settlement instruction; transfer only after web
     provider_event_id: "evt-1",
     payment_reference: instruction!.payment_reference,
     observed_amount: instruction!.amount,
-    observed_currency: "CHF"
+    observed_currency: "CHF",
+    signed: true
   });
   assert.equal(first.transferred, true);
   assert.equal(service.getReceivable(asset.receivable_id).status, "TRANSFERRED");
@@ -90,7 +91,8 @@ test("bid accept creates trade + settlement instruction; transfer only after web
     provider_event_id: "evt-1",
     payment_reference: instruction!.payment_reference,
     observed_amount: instruction!.amount,
-    observed_currency: "CHF"
+    observed_currency: "CHF",
+    signed: true
   });
   assert.equal(replay.observation.observation_id, first.observation.observation_id);
   const proposals = service.accounting(asset.receivable_id);
@@ -307,7 +309,12 @@ test("provider confirm transfers after instruction is issued", () => {
   const trade = service.acceptBid(bid.bid_id, "seller-1");
   const { instruction } = service.getTrade(trade.trade_id);
   assert.ok(instruction);
-  const confirmed = service.confirmByProvider(instruction!.instruction_id);
+  assert.throws(() => service.confirmByProvider(instruction!.instruction_id), (error: DomainError) => error.code === "confirmation_required");
+  assert.throws(
+    () => service.confirmByProvider(instruction!.instruction_id, { confirm: true }),
+    (error: DomainError) => error.code === "bank_reference_required"
+  );
+  const confirmed = service.confirmByProvider(instruction!.instruction_id, { confirm: true, bank_reference: "CAMT-2026-10-08-0001" });
   assert.equal(confirmed.transferred, true);
   assert.equal(service.getReceivable(asset.receivable_id).status, "TRANSFERRED");
   assert.throws(() => service.markPaidFromUi(), (error: DomainError) => error.code === "settlement_requires_provider");
@@ -325,7 +332,8 @@ test("mismatch webhook does not transfer", () => {
     provider_event_id: "evt-mismatch",
     payment_reference: instruction!.payment_reference,
     observed_amount: "10.00",
-    observed_currency: "CHF"
+    observed_currency: "CHF",
+    signed: true
   });
   assert.equal(result.transferred, false);
   assert.equal(service.getReceivable(asset.receivable_id).status, "TRADE_LOCKED");
@@ -564,7 +572,8 @@ test("disclosure grant is logged; RFQ returns quotes; portfolio lists purchased 
     provider_event_id: "pay-ok",
     payment_reference: instruction!.payment_reference,
     observed_amount: instruction!.amount,
-    observed_currency: "CHF"
+    observed_currency: "CHF",
+    signed: true
   });
   const book = service.portfolio("buyer-1");
   assert.equal(book.items.length, 1);

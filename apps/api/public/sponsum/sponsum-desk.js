@@ -703,7 +703,7 @@ function settlementPanelHtml(pack) {
             ? `<p>Zahlen Sie ${formatChf(inst.amount, inst.currency)} an ${formatIban(inst.payee_iban)}<br>
                Referenz <span class="mono">${esc(inst.payment_reference)}</span> · Anweisung ${badge(inst.status)}<br>
                Zahler ${esc(partyLabel(inst.payer_party_id))} · Empfänger ${esc(partyLabel(inst.payee_party_id))}</p>
-               <p class="note">Die Übertragung erfolgt erst nach Bestätigung des Zahlungsproviders.</p>
+               <p class="note">Die Übertragung erfolgt erst nach signierter Provider-Meldung oder wenn eine zweite Person den Zahlungseingang mit der Buchungsreferenz aus dem Bankauszug bestätigt.</p>
                ${pending ? `<button type="button" data-confirm="${inst.instruction_id}">Zahlungseingang übernehmen</button>` : ""}`
             : `<p class="muted">Keine Zahlungsanweisung.</p>`
         }
@@ -739,14 +739,7 @@ async function fillSettlementPanel(panel, id) {
     panel.innerHTML = settlementPanelHtml(pack);
     panel.querySelectorAll("[data-confirm]").forEach((button) => {
       button.addEventListener("click", () =>
-        act(
-          () =>
-            api(`/settlements/${button.getAttribute("data-confirm")}/provider-confirm`, {
-              method: "POST",
-              body: JSON.stringify({ provider: "external-psp" })
-            }),
-          "Zahlungseingang übernehmen und das Asset übertragen? Dieser Schritt ist nicht umkehrbar."
-        )
+        confirmSettlementManually(button.getAttribute("data-confirm"), "Zahlungseingang übernehmen und das Asset übertragen? Dieser Schritt ist nicht umkehrbar.")
       );
     });
   } catch (error) {
@@ -778,6 +771,29 @@ async function toggleSettlementRow(row, forceOpen) {
       await fillSettlementPanel(panel, key);
     }
   }
+}
+
+/**
+ * DK-31: a payment is confirmed manually only from the bank statement, by a second person (not who accepted the bid),
+ * with the bank's booking reference. The server takes amount and currency from the instruction.
+ */
+function confirmSettlementManually(instructionId, confirmText) {
+  if (busy) return act(() => Promise.resolve());
+  const reference = window.prompt(
+    `${confirmText}\n\nBuchungsreferenz des Zahlungseingangs aus dem Bankauszug (camt.054 oder E-Banking). Eine zweite Person bestätigt, nicht wer das Gebot angenommen hat.`
+  );
+  if (reference === null) return;
+  if (reference.trim().length < 4) {
+    lastError = "Bitte die Buchungsreferenz des Zahlungseingangs aus dem Bankauszug angeben.";
+    route();
+    return;
+  }
+  act(() =>
+    api(`/settlements/${encodeURIComponent(instructionId)}/provider-confirm`, {
+      method: "POST",
+      body: JSON.stringify({ confirm: true, bank_reference: reference.trim() })
+    })
+  );
 }
 
 async function act(run, confirmText) {
@@ -1044,7 +1060,7 @@ async function renderDossier(id) {
             <h2>Settlement-Instruktion</h2>
             <p>Zahlen Sie ${formatChf(pending.amount, pending.currency)} an ${formatIban(pending.payee_iban)}</p>
             <p>Referenz ${pending.payment_reference}</p>
-            <p class="note">Die Übertragung erfolgt erst nach Bestätigung des Zahlungsproviders.</p>
+            <p class="note">Die Übertragung erfolgt erst nach signierter Provider-Meldung oder wenn eine zweite Person den Zahlungseingang mit der Buchungsreferenz aus dem Bankauszug bestätigt.</p>
             <p><a href="${settlementHref(pending)}">Abrechnung öffnen</a></p>
             <button type="button" id="act-psp">Zahlungseingang vom Provider übernehmen</button>
           </section>`
@@ -1146,14 +1162,7 @@ async function renderDossier(id) {
   const psp = document.getElementById("act-psp");
   if (psp && pending) {
     psp.addEventListener("click", () =>
-      act(
-        () =>
-        api(`/settlements/${pending.instruction_id}/provider-confirm`, {
-          method: "POST",
-          body: JSON.stringify({ provider: "external-psp" })
-        }),
-        `Zahlungseingang ${formatChf(pending.amount, pending.currency)} übernehmen und das Asset übertragen?`
-      )
+      confirmSettlementManually(pending.instruction_id, `Zahlungseingang ${formatChf(pending.amount, pending.currency)} übernehmen und das Asset übertragen?`)
     );
   }
 }
@@ -2140,14 +2149,7 @@ function renderSettlement() {
   main.querySelectorAll("[data-confirm]").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      act(
-        () =>
-        api(`/settlements/${button.getAttribute("data-confirm")}/provider-confirm`, {
-          method: "POST",
-          body: JSON.stringify({ provider: "external-psp" })
-        }),
-        "Zahlungseingang übernehmen und das Asset übertragen? Dieser Schritt ist nicht umkehrbar."
-      );
+      confirmSettlementManually(button.getAttribute("data-confirm"), "Zahlungseingang übernehmen und das Asset übertragen? Dieser Schritt ist nicht umkehrbar.");
     });
   });
 }
@@ -2604,7 +2606,7 @@ async function renderSettlementDossier(id) {
             ? `<p>Zahlen Sie ${formatChf(inst.amount, inst.currency)} an ${formatIban(inst.payee_iban)}</p>
                <p>Referenz <span class="mono">${inst.payment_reference}</span></p>
                <p>Zahler ${esc(partyLabel(inst.payer_party_id))} · Empfänger ${esc(partyLabel(inst.payee_party_id))}</p>
-               <p class="note">Die Übertragung erfolgt erst nach Bestätigung des Zahlungsproviders.</p>
+               <p class="note">Die Übertragung erfolgt erst nach signierter Provider-Meldung oder wenn eine zweite Person den Zahlungseingang mit der Buchungsreferenz aus dem Bankauszug bestätigt.</p>
                ${pending ? `<button type="button" id="act-psp">Zahlungseingang vom Provider übernehmen</button>` : ""}`
             : `<p class="muted">Keine Zahlungsanweisung.</p>`
         }
@@ -2639,14 +2641,7 @@ async function renderSettlementDossier(id) {
   const psp = document.getElementById("act-psp");
   if (psp && inst) {
     psp.addEventListener("click", () =>
-      act(
-        () =>
-          api(`/settlements/${inst.instruction_id}/provider-confirm`, {
-            method: "POST",
-            body: JSON.stringify({ provider: "external-psp" })
-          }),
-        `Zahlungseingang ${formatChf(inst.amount, inst.currency)} übernehmen und das Asset übertragen?`
-      )
+      confirmSettlementManually(inst.instruction_id, `Zahlungseingang ${formatChf(inst.amount, inst.currency)} übernehmen und das Asset übertragen?`)
     );
   }
 }

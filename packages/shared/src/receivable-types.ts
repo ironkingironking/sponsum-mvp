@@ -230,6 +230,8 @@ export type SettlementInstruction = {
   payment_reference: string;
   expires_at: string;
   status: SettlementStatus;
+  /** Suite user who accepted the bid and issued the instruction; a manual confirmation needs a second person. */
+  issued_by?: string | null;
 };
 
 export type SettlementObservation = {

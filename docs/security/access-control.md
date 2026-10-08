@@ -25,6 +25,11 @@ Nur der authentifizierte Proxy setzt `X-Movena-Proxy-Secret`, `X-Movena-Tenant-I
 
 Die ursprünglichen globalen ERP-Parteisuchen und Fulfilment-Dateizugriffe sind in persönlichen Anfragen gesperrt. Parteien werden aus dem berechtigten Sponsum-Bestand abgeleitet. Die Suite-KI greift mit derselben verifizierten Identität auf diese API zu.
 
+## Zahlungseingang (Audit DK-31, 2026-10-08)
+
+- `POST /webhooks/settlement/:provider` gilt nur mit gültiger HMAC-SHA256-Signatur (`X-Sponsum-Signature: sha256=<hex>`, `X-Sponsum-Timestamp`, höchstens 5 Minuten alt) über Zeitstempel, Provider, Event-ID, Zahlungsreferenz, Betrag, Währung und Zeitpunkt. Das Geheimnis liegt in der Datei aus `SPONSUM_SETTLEMENT_WEBHOOK_SECRET_FILE`; ohne sie wird jede Meldung abgewiesen (`settlement_webhook_not_configured`). Ein Feld `signed` im Body hat keine Wirkung mehr.
+- `POST /settlements/:id/provider-confirm` ist eine manuelle Bestätigung aus dem Bankauszug: Mandantenadministration, `confirm: true`, `bank_reference` (Buchungsreferenz) und eine zweite Person (nicht wer das Gebot angenommen hat → `four_eyes_required`). Betrag und Währung kommen aus der Zahlungsanweisung; Bestätiger und Referenz stehen im Ereignis `SETTLEMENT_CONFIRMED`.
+
 ## Tests und vorhandene Vorarbeiten
 
 59 Unit-Tests und 3 relevante HTTP-Tests bestanden. Der Live-Zugriff über die echte Suite-Sitzung und die Abweisung von Header-/Mandanten-Manipulationen sind geprüft. Testdaten wurden ausschliesslich in temporären Stores erzeugt.

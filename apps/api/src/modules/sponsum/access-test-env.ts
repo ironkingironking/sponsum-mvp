@@ -9,6 +9,6 @@ process.env.SPONSUM_STORE_PATH = join(folder, "state.json");
 writeFileSync(process.env.SPONSUM_ACCESS_CONFIG, JSON.stringify({ proxySecret: secret, allowedOrigins: ["http://localhost:3000"], legacyTenant: "tenant-movena", tenants: { "tenant-movena": { groups: ["sponsum"], adminGroups: ["sponsum-admin"] } } }));
 process.on("exit", () => rmSync(folder, { recursive: true, force: true }));
 
-export function authorizedFetch(url: string, init: RequestInit = {}) {
-  return globalThis.fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-movena-proxy-secret": secret, "x-movena-tenant-id": "tenant-movena", "x-movena-subject": "http-test-admin", "x-movena-email": "http-admin@example.test", "x-movena-groups": "sponsum-admin", Origin: "http://localhost:3000" } });
+export function authorizedFetch(url: string, init: RequestInit = {}, as: { subject: string; email: string } = { subject: "http-test-admin", email: "http-admin@example.test" }) {
+  return globalThis.fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-movena-proxy-secret": secret, "x-movena-tenant-id": "tenant-movena", "x-movena-subject": as.subject, "x-movena-email": as.email, "x-movena-groups": "sponsum-admin", Origin: "http://localhost:3000" } });
 }

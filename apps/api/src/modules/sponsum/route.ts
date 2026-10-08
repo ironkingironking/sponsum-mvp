@@ -2,6 +2,7 @@ import { requireSponsumScope, principal } from "./access-context.js";
 import { Router } from "express";
 import { DomainError } from "@sponsum/shared";
 import { sponsumService } from "./service.js";
+import { settlementWebhookSecret, verifySettlementReport } from "./settlement-webhook.js";
 
 export const sponsumRouter = Router();
 sponsumRouter.use(requireSponsumScope());
@@ -23,6 +24,10 @@ const DOMAIN_STATUS: Record<string, number> = {
   lending_unreachable: 503,
   erp_unavailable: 503,
   lending_forbidden: 502,
+  settlement_webhook_not_configured: 503,
+  unsigned_webhook: 403,
+  four_eyes_required: 403,
+  bank_reference_required: 400,
   validation_error: 400,
   confirmation_required: 400,
   invalid_amount: 400,
@@ -491,23 +496,29 @@ sponsumRouter.post("/settlement/mark-paid", (_req, res) => {
 });
 
 sponsumRouter.post("/settlements/:instructionId/provider-confirm", (req, res) => {
-  handle(() => sponsumService.confirmByProvider(req.params.instructionId, String(req.body?.provider ?? "external-psp")), res);
-});
-
-sponsumRouter.post("/webhooks/settlement/:provider", (req, res) => {
   handle(
     () =>
-      sponsumService.applySettlementWebhook({
-        provider: req.params.provider,
-        provider_event_id: String(req.body.provider_event_id),
-        payment_reference: String(req.body.payment_reference),
-        observed_amount: String(req.body.observed_amount),
-        observed_currency: String(req.body.observed_currency),
-        observed_at: req.body.observed_at,
-        signed: req.body.signed !== false
+      sponsumService.confirmByProvider(req.params.instructionId, {
+        confirm: req.body?.confirm === true,
+        bank_reference: req.body?.bank_reference
       }),
     res
   );
+});
+
+// DK-31: "signed" is decided by the HMAC check against the configured provider secret, never by the request body.
+sponsumRouter.post("/webhooks/settlement/:provider", (req, res) => {
+  handle(() => {
+    const report = {
+      provider_event_id: String(req.body?.provider_event_id ?? ""),
+      payment_reference: String(req.body?.payment_reference ?? ""),
+      observed_amount: String(req.body?.observed_amount ?? ""),
+      observed_currency: String(req.body?.observed_currency ?? ""),
+      ...(typeof req.body?.observed_at === "string" ? { observed_at: req.body.observed_at } : {})
+    };
+    verifySettlementReport({ headers: req.headers, provider: req.params.provider, report, secret: settlementWebhookSecret() });
+    return sponsumService.applySettlementWebhook({ provider: req.params.provider, ...report, signed: true });
+  }, res);
 });
 
 sponsumRouter.post("/offers/:id/disclosure-requests", (req, res) => {

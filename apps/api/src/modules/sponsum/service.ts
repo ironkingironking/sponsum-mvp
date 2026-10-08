@@ -142,7 +142,10 @@ export type SettlementWebhookInput = {
   observed_amount: string;
   observed_currency: string;
   observed_at?: string;
+  /** Set by the server after verifying the provider signature (route) or for its own trusted calls; never from a body. */
   signed?: boolean;
+  /** Manual confirmation from a bank statement: who confirmed and the bank's booking reference. */
+  confirmation?: { by: string; bank_reference: string };
 };
 
 const EVENT_SECRET = "sponsum-node-event-secret";
@@ -812,7 +815,8 @@ export class SponsumService {
       payee_iban: payeeIban,
       payment_reference: `SPN-${trade.trade_id.slice(-10).toUpperCase()}`,
       expires_at: new Date(Date.now() + 3 * 86400000).toISOString(),
-      status: "ISSUED"
+      status: "ISSUED",
+      issued_by: principal()?.userId ?? null
     };
     trade.status = "SETTLEMENT_PENDING";
     state.trades.push(trade);
@@ -851,7 +855,17 @@ export class SponsumService {
     throw new DomainError("settlement_requires_provider", "UI cannot confirm settlement; provider webhook required");
   }
 
-  confirmByProvider(instructionId: string, provider = "external-psp") {
+  /**
+   * Manual settlement from a bank statement (DK-31). Not a provider report: a tenant admin confirms with an explicit
+   * confirmation and the bank's booking reference, and must be a different person than the one who accepted the bid
+   * and issued the instruction. Amount and currency come from the instruction; nothing is taken from the request
+   * except the reference, which is recorded with the confirming user.
+   */
+  confirmByProvider(instructionId: string, input: { confirm?: unknown; bank_reference?: unknown } = {}) {
+    const who = principal();
+    if (who && !who.admin) {
+      throw new DomainError("forbidden", "Nur die Mandantenadministration kann einen Zahlungseingang bestätigen.");
+    }
     const state = this.store.snapshot();
     const instruction = state.instructions.find((row) => row.instruction_id === instructionId);
     if (!instruction) throw new DomainError("instruction_not_found", "Unknown settlement instruction");
@@ -860,13 +874,30 @@ export class SponsumService {
       const trade = state.trades.find((row) => row.trade_id === instruction.trade_id);
       return { instruction, observation, transferred: trade?.status === "COMPLETED" };
     }
+    if (input.confirm !== true) {
+      throw new DomainError("confirmation_required", "Der Zahlungseingang braucht eine ausdrückliche Bestätigung.");
+    }
+    const reference = typeof input.bank_reference === "string" ? input.bank_reference.trim() : "";
+    if (reference.length < 4 || reference.length > 140 || /[\x00-\x1f]/.test(reference)) {
+      throw new DomainError(
+        "bank_reference_required",
+        "Bitte die Buchungsreferenz des Zahlungseingangs aus dem Bankauszug angeben (4 bis 140 Zeichen)."
+      );
+    }
+    if (who && instruction.issued_by && instruction.issued_by === who.userId) {
+      throw new DomainError(
+        "four_eyes_required",
+        "Den Zahlungseingang muss eine zweite Person bestätigen, nicht wer das Gebot angenommen hat."
+      );
+    }
     const result = this.applySettlementWebhook({
-      provider,
-      provider_event_id: `psp-${instruction.instruction_id}`,
+      provider: "manual-bank-statement",
+      provider_event_id: `manual-${instruction.instruction_id}`,
       payment_reference: instruction.payment_reference,
       observed_amount: instruction.amount,
       observed_currency: instruction.currency,
-      signed: true
+      signed: true,
+      confirmation: { by: who?.userId ?? "system", bank_reference: reference }
     });
     if (result.transferred) {
       const next = this.store.snapshot();
@@ -883,8 +914,8 @@ export class SponsumService {
     observation: SettlementObservation;
     transferred: boolean;
   } {
-    if (input.signed === false) {
-      throw new DomainError("unsigned_webhook", "Settlement webhook must be signed");
+    if (input.signed !== true) {
+      throw new DomainError("unsigned_webhook", "Die Zahlungsmeldung ist nicht signiert.");
     }
     const state = this.store.snapshot();
     const replay = state.observations.find(
@@ -949,7 +980,13 @@ export class SponsumService {
       type: "SETTLEMENT_CONFIRMED",
       receivable_id: asset.receivable_id,
       trade_id: trade.trade_id,
-      payload: { provider: input.provider, provider_event_id: input.provider_event_id }
+      payload: {
+        provider: input.provider,
+        provider_event_id: input.provider_event_id,
+        ...(input.confirmation
+          ? { confirmed_by: input.confirmation.by, bank_reference: input.confirmation.bank_reference }
+          : {})
+      }
     });
     const transferEvent = this.appendEvent(state, {
       type: "ASSET_TRANSFERRED",
@@ -2799,7 +2836,8 @@ export class SponsumService {
         provider_event_id: "demo-pay-551",
         payment_reference: instruction.payment_reference,
         observed_amount: instruction.amount,
-        observed_currency: "CHF"
+        observed_currency: "CHF",
+        signed: true
       });
     }
 

@@ -253,9 +253,16 @@ test("HTTP dispute and settlement dossiers 404 or resolve from workspace", async
       const settlePack = (await (await fetch(`${base}/api/sponsum/v1/trades/${trade.trade_id}`)).json()) as {
         instruction: { instruction_id: string };
       };
+      const confirmUrl = `${base}/api/sponsum/v1/settlements/${settlePack.instruction.instruction_id}/provider-confirm`;
+      const confirmBody = JSON.stringify({ confirm: true, bank_reference: "CAMT-HTTP-0001", signed: true, provider: "external-psp" });
+      // DK-31: the person who accepted the bid cannot confirm the payment; body flags like "signed" change nothing.
+      const own = await fetch(confirmUrl, { method: "POST", headers: json, body: confirmBody });
+      assert.equal(own.status, 403);
+      assert.equal(((await own.json()) as { error: { code: string } }).error.code, "four_eyes_required");
       const confirm = await fetch(
-        `${base}/api/sponsum/v1/settlements/${settlePack.instruction.instruction_id}/provider-confirm`,
-        { method: "POST", headers: json, body: JSON.stringify({ provider: "external-psp" }) }
+        confirmUrl,
+        { method: "POST", headers: json, body: confirmBody },
+        { subject: "http-test-admin-2", email: "http-admin-2@example.test" }
       );
       assert.equal(confirm.status, 200);
       const accList = (await (await fetch(`${base}/api/sponsum/v1/accounting`)).json()) as Array<{

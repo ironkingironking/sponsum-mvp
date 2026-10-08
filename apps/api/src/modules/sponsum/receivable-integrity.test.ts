@@ -296,3 +296,60 @@ test("a legacy second receivable for an invoice already in Lending gets no secon
   await assert.rejects(service.requestCapitalNeedLoan(other.need_id, { confirm: true }), domainCode("invoice_already_financed"));
   assert.equal(mock.docs.get("Loan Application")!.length, 1);
 });
+
+test("settlement: a manual confirmation needs a second person and the bank reference", () => {
+  const service = new SponsumService();
+  const boss: Principal = { tenantId: "t1", userId: "boss", email: "boss@example.test", admin: true, legacyTenant: "t1" };
+  const second: Principal = { ...boss, userId: "second", email: "second@example.test" };
+  const asset = inScope(boss, () => unlinked(service), "write");
+  inScope(boss, () => {
+    service.setKyc(SEEKER, "PASSED");
+    service.setKyc("buyer-1", "PASSED");
+  }, "write");
+  const offer = inScope(boss, () => service.createOffer(asset.receivable_id, { seller_party_id: SEEKER, min_price: "1000" }), "write");
+  const bid = inScope(boss, () => service.createBid(offer.offer_id, "buyer-1", "1100"), "write");
+  const trade = inScope(boss, () => service.acceptBid(bid.bid_id, SEEKER), "write");
+  const { instruction } = inScope(boss, () => service.getTrade(trade.trade_id), "read");
+  assert.equal(instruction!.issued_by, "boss");
+  const confirm = { confirm: true, bank_reference: "CAMT-2026-10-08-42" };
+  assert.throws(() => inScope(boss, () => service.confirmByProvider(instruction!.instruction_id, confirm), "write"), domainCode("four_eyes_required"));
+  const result = inScope(second, () => service.confirmByProvider(instruction!.instruction_id, confirm), "write");
+  assert.equal(result.transferred, true);
+  assert.equal(result.observation?.provider, "manual-bank-statement");
+  const confirmed = inScope(second, () => service.events(asset.receivable_id), "read").find((event) => event.event_type === "SETTLEMENT_CONFIRMED");
+  assert.equal(confirmed?.payload.confirmed_by, "second");
+  assert.equal(confirmed?.payload.bank_reference, "CAMT-2026-10-08-42");
+});
+
+test("settlement webhook: unsigned reports never settle, whatever the body says", async () => {
+  const { signSettlementReport, verifySettlementReport, settlementWebhookSecret } = await import("./settlement-webhook.js");
+  const service = new SponsumService();
+  service.setKyc(SEEKER, "PASSED");
+  service.setKyc("buyer-1", "PASSED");
+  const asset = unlinked(service);
+  const offer = service.createOffer(asset.receivable_id, { seller_party_id: SEEKER, min_price: "1000" });
+  const trade = service.acceptBid(service.createBid(offer.offer_id, "buyer-1", "1100").bid_id, SEEKER);
+  const { instruction } = service.getTrade(trade.trade_id);
+  const report = { provider_event_id: "psp-1", payment_reference: instruction!.payment_reference, observed_amount: "1100.00", observed_currency: "CHF" };
+  // The service itself refuses anything not verified by the server.
+  assert.throws(() => service.applySettlementWebhook({ provider: "psp", ...report }), domainCode("unsigned_webhook"));
+
+  const secret = "s".repeat(40);
+  const now = Date.parse("2026-10-08T10:00:00Z");
+  const timestamp = String(Math.floor(now / 1000));
+  const headers = { "x-sponsum-timestamp": timestamp, "x-sponsum-signature": signSettlementReport(secret, timestamp, "psp", report) };
+  assert.throws(() => verifySettlementReport({ headers, provider: "psp", report, secret: null, nowMs: now }), domainCode("settlement_webhook_not_configured"));
+  assert.throws(
+    () => verifySettlementReport({ headers: { ...headers, "x-sponsum-signature": "sha256=00" }, provider: "psp", report, secret, nowMs: now }),
+    domainCode("unsigned_webhook")
+  );
+  assert.throws(
+    () => verifySettlementReport({ headers, provider: "psp", report: { ...report, observed_amount: "1.00" }, secret, nowMs: now }),
+    domainCode("unsigned_webhook")
+  );
+  assert.throws(() => verifySettlementReport({ headers, provider: "psp", report, secret, nowMs: now + 3_600_000 }), domainCode("unsigned_webhook"));
+  verifySettlementReport({ headers, provider: "psp", report, secret, nowMs: now });
+  assert.equal(service.applySettlementWebhook({ provider: "psp", ...report, signed: true }).transferred, true);
+  assert.equal(settlementWebhookSecret({ SPONSUM_SETTLEMENT_WEBHOOK_SECRET_FILE: "/x" }, () => "short"), null);
+  assert.equal(settlementWebhookSecret({}, () => secret), null);
+});
