@@ -192,3 +192,63 @@ test("confirmation and loan re-check the Sales Invoice; a paid invoice creates n
   mock.addSalesInvoice({ name: "ACC-SINV-2026-00012", outstanding_amount: 5400 });
   assert.equal((await service.requestCapitalNeedLoan(need.need_id, { confirm: true })).created, true);
 });
+
+function unlinked(service: SponsumService, creditor = SEEKER) {
+  return service.createReceivable({ ...input(`RE-${Math.random().toString(16).slice(2, 8)}`, creditor), evidence: FULL });
+}
+
+test("a receivable reserved for financing cannot be offered or sold", () => {
+  const service = new SponsumService();
+  const boss: Principal = { tenantId: "t1", userId: "boss", email: "boss@example.test", admin: true, legacyTenant: "t1" };
+  const member: Principal = { ...boss, userId: "member", email: "member@example.test", admin: false };
+  const asset = inScope(boss, () => unlinked(service), "write");
+  inScope(boss, () => service.setKyc(SEEKER, "PASSED"), "write");
+  // The need belongs to another user of the tenant; the guard looks at the whole store.
+  const need = inScope(member, () => service.createCapitalNeed({ seeker_party_id: SEEKER, kind: "SHORT_DEBT", amount: "1000", tenor_months: 6 }).need, "write");
+  inScope(boss, () => service.confirmCapitalNeed(need.need_id, { receivable_id: asset.receivable_id, confirm: true }), "write");
+  const steps: Array<() => unknown> = [
+    () => service.createOffer(asset.receivable_id, { seller_party_id: SEEKER }),
+    () => service.requestLiquidity(asset.receivable_id, SEEKER),
+    () => service.createAssignment({ receivable_id: asset.receivable_id, seller_party_id: SEEKER, buyer_party_id: "buyer-1", purchase_price: "900" })
+  ];
+  for (const step of steps) {
+    assert.throws(() => inScope(boss, step, "write"), domainCode("receivable_encumbered"));
+  }
+});
+
+test("an offered or sold receivable cannot be linked to a capital need", () => {
+  const service = new SponsumService();
+  service.setKyc(SEEKER, "PASSED");
+  const asset = unlinked(service);
+  service.createOffer(asset.receivable_id, { seller_party_id: SEEKER, min_price: "1000" });
+  const { need } = service.createCapitalNeed({ seeker_party_id: SEEKER, kind: "SHORT_DEBT", amount: "1000", tenor_months: 6 });
+  assert.throws(
+    () => service.confirmCapitalNeed(need.need_id, { receivable_id: asset.receivable_id, confirm: true }),
+    domainCode("receivable_encumbered")
+  );
+  // A second need cannot reserve the same receivable either.
+  const free = unlinked(service);
+  const first = service.createCapitalNeed({ seeker_party_id: SEEKER, kind: "SHORT_DEBT", amount: "500", tenor_months: 6 }).need;
+  service.confirmCapitalNeed(first.need_id, { receivable_id: free.receivable_id, confirm: true });
+  const second = service.createCapitalNeed({ seeker_party_id: SEEKER, kind: "SHORT_DEBT", amount: "500", tenor_months: 6 }).need;
+  assert.throws(
+    () => service.confirmCapitalNeed(second.need_id, { receivable_id: free.receivable_id, confirm: true }),
+    domainCode("receivable_encumbered")
+  );
+});
+
+test("withdrawing a need keeps the reservation while Lending has an open application", async () => {
+  const service = new SponsumService();
+  const mock = erp(service);
+  service.setKyc(SEEKER, "PASSED");
+  const asset = unlinked(service);
+  const { need } = service.createCapitalNeed({ seeker_party_id: SEEKER, kind: "SHORT_DEBT", amount: "1000", tenor_months: 6 });
+  service.confirmCapitalNeed(need.need_id, { receivable_id: asset.receivable_id, confirm: true });
+  const loan = await service.requestCapitalNeedLoan(need.need_id, { confirm: true });
+  await assert.rejects(service.withdrawCapitalNeed(need.need_id), domainCode("receivable_encumbered"));
+  assert.throws(() => service.createOffer(asset.receivable_id, { seller_party_id: SEEKER }), domainCode("receivable_encumbered"));
+  // Lending rejects the application: the need can be withdrawn and the receivable is free again.
+  Object.assign(mock.docs.get("Loan Application")!.find((doc) => doc.name === loan.loan_application)!, { status: "Rejected" });
+  assert.equal((await service.withdrawCapitalNeed(need.need_id)).status, "WITHDRAWN");
+  assert.equal(service.createOffer(asset.receivable_id, { seller_party_id: SEEKER }).status, "LIVE");
+});

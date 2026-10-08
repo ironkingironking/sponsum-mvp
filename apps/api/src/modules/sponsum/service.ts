@@ -225,6 +225,47 @@ export class SponsumService {
     return invoice;
   }
 
+  /**
+   * DK-31: a receivable that is reserved for financing (confirmed capital need) or financed cannot be offered or sold.
+   * Capital needs are owner-scoped, so the check looks at the whole store; only the boolean leaves it.
+   */
+  private assertNotFinanced(asset: ReceivableAsset): void {
+    const id = asset.receivable_id;
+    if (
+      asset.status === "FINANCED" ||
+      existsGlobally(this.store, "capital_needs", (need) => need.receivable_id === id && need.status === "CONFIRMED")
+    ) {
+      throw new DomainError(
+        "receivable_encumbered",
+        "Die Forderung ist für eine Finanzierung reserviert oder finanziert und kann nicht angeboten oder verkauft werden."
+      );
+    }
+  }
+
+  /** DK-31: an offered, sold or assigned receivable, or one already linked to another capital need, cannot be financed. */
+  private assertNotForSale(state: SponsumState, asset: ReceivableAsset, needId: string): void {
+    const id = asset.receivable_id;
+    const lock = state.locks.find((row) => row.receivable_id === id);
+    const engaged =
+      ["OFFERED", "TRADE_LOCKED", "TRANSFERRED", "FINANCED"].includes(asset.status) ||
+      asset.current_holder_party_id !== asset.creditor_party_id ||
+      (lock !== undefined && lock.state !== "UNLOCKED") ||
+      state.offers.some((row) => row.receivable_id === id && row.status === "LIVE") ||
+      state.registry.some((row) => row.receivable_id === id && row.status === "ACTIVE") ||
+      state.trades.some((row) => row.receivable_id === id && !["CANCELLED", "SETTLEMENT_FAILED"].includes(row.status)) ||
+      existsGlobally(
+        this.store,
+        "capital_needs",
+        (need) => need.receivable_id === id && need.status === "CONFIRMED" && need.need_id !== needId
+      );
+    if (engaged) {
+      throw new DomainError(
+        "receivable_encumbered",
+        "Die Forderung ist angeboten, verkauft, abgetreten oder bereits für eine andere Finanzierung reserviert."
+      );
+    }
+  }
+
   createReceivable(input: CreateReceivableInput): ReceivableAsset {
     const who = principal();
     if (who) {
@@ -579,6 +620,7 @@ export class SponsumService {
     if (input.seller_party_id !== asset.current_holder_party_id) {
       throw new DomainError("forbidden", "Only the current holder can offer the receivable");
     }
+    this.assertNotFinanced(asset);
     this.checkedInvoice(asset);
     const lock = mustLock(state, receivableId);
     const live = state.offers.filter((row) => row.receivable_id === receivableId && row.status === "LIVE");
@@ -715,6 +757,7 @@ export class SponsumService {
     if (!offer || offer.status !== "LIVE") throw new DomainError("offer_not_live", "Offer is not live");
     if (offer.seller_party_id !== sellerPartyId) throw new DomainError("forbidden", "Only seller can accept");
     const asset = mustAsset(state, offer.receivable_id);
+    this.assertNotFinanced(asset);
     this.checkedInvoice(asset);
     const lock = mustLock(state, asset.receivable_id);
     assertTransition(RECEIVABLE_TRANSITIONS, asset.status, "TRADE_LOCKED", "receivable");
@@ -2360,7 +2403,29 @@ export class SponsumService {
     return { need, interest, provider };
   }
 
-  withdrawCapitalNeed(needId: string): CapitalNeed {
+  async withdrawCapitalNeed(needId: string): Promise<CapitalNeed> {
+    const before = this.store.snapshot();
+    const current = before.capital_needs.find((row) => row.need_id === needId);
+    if (!current) throw new DomainError("not_found", "Kapitalsuche nicht gefunden");
+    // DK-31: a confirmed need with a Lending application keeps the receivable reserved until Lending has nothing open,
+    // otherwise the receivable could be sold while it is being financed.
+    const requested = before.events.some(
+      (event) => event.event_type === "LENDING_APPLICATION_REQUESTED" && event.payload?.need_id === needId
+    );
+    if (current.status === "CONFIRMED" && current.receivable_id && requested) {
+      let open;
+      try {
+        open = await readLendingStatus(current.receivable_id, this.lendingDeps());
+      } catch (error) {
+        throw lendingToDomain(error);
+      }
+      if (open) {
+        throw new DomainError(
+          "receivable_encumbered",
+          "In Frappe Lending ist für diese Forderung ein Kreditantrag oder Kredit offen. Erst dort ablehnen oder abschliessen."
+        );
+      }
+    }
     const state = this.store.snapshot();
     const need = state.capital_needs.find((row) => row.need_id === needId);
     if (!need) throw new DomainError("not_found", "Kapitalsuche nicht gefunden");
@@ -2393,6 +2458,7 @@ export class SponsumService {
     }
     const asset = state.assets.find((row) => row.receivable_id === receivableId);
     if (!asset) throw new DomainError("not_found", "Forderung nicht gefunden");
+    this.assertNotForSale(state, asset, need.need_id);
     this.checkedInvoice(asset);
     try {
       assertLendable({ ...need, status: "CONFIRMED", receivable_id: asset.receivable_id }, asset);

@@ -68,6 +68,12 @@ ERPNext bleibt System of Record der Rechnung. Eine Forderung kann mit `sales_inv
 
 Forderungen ohne `sales_invoice` (z. B. Rechnungen von Kunden, die nicht in ERPNext liegen) bleiben manuell erfasst.
 
+**Verkauf oder Finanzierung, nie beides** (`receivable_encumbered`):
+
+- Ist eine Forderung mit einem bestätigten Kapitalbedarf verknüpft oder `FINANCED`, verweigern Angebot, Liquiditätsanfrage, Gebotsannahme und Zession.
+- Ist eine Forderung angeboten (`LIVE`-Angebot, Sperre), gehandelt, abgetreten, nicht mehr beim Gläubiger oder schon mit einem anderen Kapitalbedarf verknüpft, verweigert die Bestätigung des Kapitalbedarfs.
+- Ein bestätigter Kapitalbedarf mit Kreditantrag lässt sich erst zurückziehen, wenn Lending nichts Offenes mehr hat (abgelehnt, geschlossen); sonst bleibt die Forderung reserviert.
+
 ## Status (read-only)
 
 `readLendingStatus(receivableId, deps)` liefert drei Fälle:
