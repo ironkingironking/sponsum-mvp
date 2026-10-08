@@ -252,3 +252,47 @@ test("withdrawing a need keeps the reservation while Lending has an open applica
   assert.equal((await service.withdrawCapitalNeed(need.need_id)).status, "WITHDRAWN");
   assert.equal(service.createOffer(asset.receivable_id, { seller_party_id: SEEKER }).status, "LIVE");
 });
+
+test("the Lending handover is idempotent on (receivable, invoice), also for parallel requests", async () => {
+  const service = new SponsumService();
+  const mock = erp(service);
+  const asset = await linked(service);
+  const { need } = service.createCapitalNeed({ seeker_party_id: SEEKER, kind: "SHORT_DEBT", amount: "5000", tenor_months: 6 });
+  await service.withCheckedInvoice(asset.receivable_id, () =>
+    service.confirmCapitalNeed(need.need_id, { receivable_id: asset.receivable_id, confirm: true })
+  );
+  const [first, second] = await Promise.all([
+    service.requestCapitalNeedLoan(need.need_id, { confirm: true }),
+    service.requestCapitalNeedLoan(need.need_id, { confirm: true })
+  ]);
+  assert.equal(mock.docs.get("Loan Application")!.length, 1);
+  assert.equal([first.created, second.created].filter(Boolean).length, 1);
+  assert.equal(first.loan_application, second.loan_application);
+  const retry = await service.requestCapitalNeedLoan(need.need_id, { confirm: true });
+  assert.equal(retry.created, false);
+  assert.equal(mock.docs.get("Loan Application")!.length, 1);
+});
+
+test("a legacy second receivable for an invoice already in Lending gets no second loan", async () => {
+  const raw = new MemorySponsumStore();
+  const service = new SponsumService(raw);
+  const mock = erp(service);
+  const asset = await linked(service);
+  const { need } = service.createCapitalNeed({ seeker_party_id: SEEKER, kind: "SHORT_DEBT", amount: "2000", tenor_months: 6 });
+  await service.withCheckedInvoice(asset.receivable_id, () =>
+    service.confirmCapitalNeed(need.need_id, { receivable_id: asset.receivable_id, confirm: true })
+  );
+  await service.requestCapitalNeedLoan(need.need_id, { confirm: true });
+  // A duplicate stored before the global check existed (e.g. in another tenant).
+  const state = raw.snapshot();
+  const copy = { ...structuredClone(state.assets[0]), receivable_id: "SPN-LEGACY-1", origin_tenant_id: "tenant-old" };
+  state.assets.push(copy);
+  state.locks.push({ receivable_id: copy.receivable_id, state: "UNLOCKED", offer_id: null, trade_id: null, version: 1 });
+  raw.replace(state);
+  const other = service.createCapitalNeed({ seeker_party_id: SEEKER, kind: "SHORT_DEBT", amount: "2000", tenor_months: 6 }).need;
+  await service.withCheckedInvoice(copy.receivable_id, () =>
+    service.confirmCapitalNeed(other.need_id, { receivable_id: copy.receivable_id, confirm: true })
+  );
+  await assert.rejects(service.requestCapitalNeedLoan(other.need_id, { confirm: true }), domainCode("invoice_already_financed"));
+  assert.equal(mock.docs.get("Loan Application")!.length, 1);
+});

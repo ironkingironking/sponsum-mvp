@@ -36,7 +36,10 @@ Ablauf von `requestLoanApplication({ need, receivable, confirm: true }, deps)`:
 
 1. **Bestätigung:** ohne `confirm: true` → `confirmation_required`.
 2. **Einrichtung:** Fehlt die Lending-Konfiguration → `lending_not_configured`. Das ist der heutige Zustand, solange Kreditprodukt und Konten nicht entschieden sind (O1).
-3. **Idempotenz:** Gibt es für die Forderung schon eine offene Loan Application oder einen Loan, kommt dieser zurück (`created: false`), auch wenn die Forderung inzwischen z. B. `FINANCED` ist. Abgelehnte oder geschlossene zählen nicht.
+3. **Idempotenz** auf `(receivable_id, sales_invoice)` (Audit DK-31):
+   - Gibt es für die Forderung schon eine offene Loan Application oder einen Loan, kommt dieser zurück (`created: false`), auch wenn die Forderung inzwischen z. B. `FINANCED` ist. Abgelehnte oder geschlossene zählen nicht.
+   - Parallele Aufrufe mit demselben Schlüssel (Doppelklick, Retry während der erste Aufruf noch auf Lending wartet) teilen sich eine Übergabe; es entsteht höchstens ein Antrag. Das gilt pro API-Prozess (Sponsum läuft als ein Container).
+   - Hat Lending für eine andere Sponsum-Forderung derselben Rechnung (Altbestand vor der globalen Dublettenprüfung) etwas Offenes → `invoice_already_financed`.
 4. **Eignung**, geprüft von Sponsum, bevor etwas geschrieben wird:
    - Kapitalbedarf `CONFIRMED` (O5) und als `SHORT_DEBT` oder `LONG_DEBT`, verknüpft mit genau dieser Forderung
    - kein Wechsel, also weder `LEGAL_BILL_OF_EXCHANGE` noch `BITCREDIT_EBILL` (O3)
@@ -106,7 +109,7 @@ Stabil, Meldungen auf Deutsch.
 | Einrichtung und Verbindung | `lending_not_configured`, `lending_unreachable` (Netzwerk, 5xx), `lending_forbidden` (401/403), `lending_rejected` (andere 4xx, mit der ersten Zeile von Frappes Meldung, ohne Traceback und ohne Zugangsdaten) |
 | Bestätigung | `confirmation_required` |
 | Kapitalbedarf | `capital_need_not_confirmed`, `capital_need_not_debt`, `capital_need_receivable_mismatch` |
-| Forderung | `wechsel_not_lendable`, `receivable_not_lendable`, `receivable_without_invoice`, `receivable_not_held_by_borrower` |
+| Forderung | `wechsel_not_lendable`, `receivable_not_lendable`, `receivable_without_invoice`, `receivable_not_held_by_borrower`, `invoice_already_financed` |
 | Kreditnehmer | `borrower_not_customer`, `customer_not_found` |
 | Beträge | `currency_mismatch`, `invalid_amount`, `loan_amount_exceeds_receivable` |
 

@@ -169,3 +169,19 @@ export function existsGlobally(store: Store, kind: string, predicate: (row: Row)
     }
   });
 }
+
+/** Ids (`idKey`) of all rows of `kind` across tenants that match; for server-side lookups only, never for responses. */
+export function idsGlobally(store: Store, kind: string, idKey: string, predicate: (row: Row) => boolean): string[] {
+  const raw = originals.get(store) ?? store;
+  const full: State = raw.snapshot();
+  return rows(full, kind)
+    .filter((row) => {
+      try {
+        return predicate(row);
+      } catch {
+        return false;
+      }
+    })
+    .map((row) => String(row[idKey] ?? ""))
+    .filter(Boolean);
+}

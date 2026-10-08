@@ -26,6 +26,7 @@ export type LendingErrorCode =
   | "capital_need_receivable_mismatch"
   | "wechsel_not_lendable"
   | "receivable_not_lendable"
+  | "invoice_already_financed"
   | "receivable_without_invoice"
   | "receivable_not_held_by_borrower"
   | "borrower_not_customer"
@@ -193,6 +194,8 @@ export type LendableReceivable = {
   creditor_party_id: string;
   current_holder_party_id: string;
   invoice_id: string;
+  /** ERPNext Sales Invoice behind the receivable, part of the handover's idempotency key (DK-31). */
+  sales_invoice?: string | null;
 };
 
 export const LENDABLE_CAPITAL_KINDS = ["SHORT_DEBT", "LONG_DEBT"] as const;
@@ -321,23 +324,51 @@ async function existingForReceivable(
   return { application: open(applications), loan: open(loans) };
 }
 
+export type LoanApplicationRequest = {
+  need: LendableCapitalNeed;
+  receivable: LendableReceivable;
+  confirm?: boolean;
+  /** Re-reads what ERPNext leads (open invoice, outstanding amount) right before a new application is created. */
+  refresh?: (receivable: LendableReceivable) => Promise<LendableReceivable>;
+  /** Other Sponsum receivables for the same invoice (legacy duplicates); Lending must have nothing open for them. */
+  relatedReceivableIds?: string[];
+};
+
+/** DK-31: idempotency key of the handover, (receivable_id, sales invoice). */
+export function loanIdempotencyKey(receivable: LendableReceivable): string {
+  const invoice = String(receivable.sales_invoice || receivable.invoice_id || "").trim().toUpperCase();
+  return `${receivable.receivable_id}\u0000${invoice}`;
+}
+
+/**
+ * Handovers running in this process, by idempotency key: a double click or a retry while the first request still
+ * waits for Lending joins it instead of creating a second Loan Application.
+ */
+const inFlightApplications = new Map<string, Promise<LoanApplicationResult>>();
+
 /**
  * Creates the draft Loan Application for a confirmed capital need, or returns the open one that already exists for
- * the receivable (idempotent). Rate, schedule and accounts come from the Loan Product in Lending, never from Sponsum.
+ * the receivable (idempotent on (receivable_id, sales invoice)). Rate, schedule and accounts come from the Loan
+ * Product in Lending, never from Sponsum.
  */
-export async function requestLoanApplication(
-  input: {
-    need: LendableCapitalNeed;
-    receivable: LendableReceivable;
-    confirm?: boolean;
-    /** Re-reads what ERPNext leads (open invoice, outstanding amount) right before a new application is created. */
-    refresh?: (receivable: LendableReceivable) => Promise<LendableReceivable>;
-  },
-  deps: LendingDeps
-): Promise<LoanApplicationResult> {
+export async function requestLoanApplication(input: LoanApplicationRequest, deps: LendingDeps): Promise<LoanApplicationResult> {
   if (input.confirm !== true) {
     throw new LendingError("confirmation_required", "Kreditantrag braucht eine explizite Bestätigung.");
   }
+  requireConfigured(deps);
+  const key = loanIdempotencyKey(input.receivable);
+  const running = inFlightApplications.get(key);
+  if (running) return { ...(await running), created: false };
+  const attempt = createOrReturnLoanApplication(input, deps);
+  inFlightApplications.set(key, attempt);
+  try {
+    return await attempt;
+  } finally {
+    inFlightApplications.delete(key);
+  }
+}
+
+async function createOrReturnLoanApplication(input: LoanApplicationRequest, deps: LendingDeps): Promise<LoanApplicationResult> {
   const { config, transport } = requireConfigured(deps);
 
   // Idempotent first: a repeated call returns what Lending already has for the receivable, even when the receivable
@@ -352,6 +383,16 @@ export async function requestLoanApplication(
     return { created: false, loan_application: name, loan: null, deep_link: deskLink(config, "loan-application", name), source: "LENDING · Loan Application" };
   }
 
+  for (const related of input.relatedReceivableIds ?? []) {
+    if (related === input.receivable.receivable_id) continue;
+    const other = await existingForReceivable(transport, related);
+    if (other.application || other.loan) {
+      throw new LendingError(
+        "invoice_already_financed",
+        "Für dieselbe Rechnung besteht in Frappe Lending bereits ein Kreditantrag oder Kredit (andere Sponsum-Forderung)."
+      );
+    }
+  }
   const receivable = input.refresh ? await input.refresh(input.receivable) : input.receivable;
   const customer = assertLendable(input.need, receivable);
   if (!(await transport.get("Customer", customer))) {

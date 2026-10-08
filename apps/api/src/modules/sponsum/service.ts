@@ -1,5 +1,5 @@
 import { principal } from "./access-context.js";
-import { existsGlobally, secureStore, setRecordReaders } from "./scoped-store.js";
+import { existsGlobally, idsGlobally, secureStore, setRecordReaders } from "./scoped-store.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -264,6 +264,22 @@ export class SponsumService {
         "Die Forderung ist angeboten, verkauft, abgetreten oder bereits für eine andere Finanzierung reserviert."
       );
     }
+  }
+
+  /** Other receivables for the same invoice across tenants (legacy duplicates from before the global check). */
+  private sameInvoiceReceivables(asset: ReceivableAsset): string[] {
+    const salesInvoice = normalizedInvoiceNo(asset.sales_invoice ?? "");
+    const invoice = normalizedInvoiceNo(asset.invoice_id);
+    const creditor = creditorIdentity(asset.creditor_party_id, asset.origin_tenant_id);
+    return idsGlobally(this.store, "assets", "receivable_id", (row) => {
+      if (row.receivable_id === asset.receivable_id || row.parent_receivable_id) return false;
+      if (salesInvoice && normalizedInvoiceNo(row.sales_invoice ?? "") === salesInvoice) return true;
+      return (
+        Boolean(invoice) &&
+        normalizedInvoiceNo(row.invoice_id) === invoice &&
+        creditorIdentity(row.creditor_party_id, row.origin_tenant_id) === creditor
+      );
+    });
   }
 
   createReceivable(input: CreateReceivableInput): ReceivableAsset {
@@ -2503,6 +2519,7 @@ export class SponsumService {
           need,
           receivable: asset,
           confirm: input.confirm,
+          relatedReceivableIds: this.sameInvoiceReceivables(asset),
           // DK-31: before Lending gets a new application, the linked invoice must still be open in ERPNext; the loan
           // can be at most what ERPNext still shows as outstanding.
           refresh: async (receivable) => {
