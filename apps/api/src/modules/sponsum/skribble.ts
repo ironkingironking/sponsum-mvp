@@ -116,7 +116,7 @@ export async function createSkribbleRequest(input: {
       ]
     }
   });
-  return normalize(raw, quality);
+  return normalize(jsonObject(raw), quality);
 }
 
 export async function getSkribbleRequest(id: string): Promise<SkribbleRequest> {
@@ -135,7 +135,7 @@ export async function getSkribbleRequest(id: string): Promise<SkribbleRequest> {
   }
   const token = await getToken();
   const raw = await skribbleFetch(`/signature-requests/${encodeURIComponent(id)}`, { method: "GET", token });
-  return normalize(raw, null);
+  return normalize(jsonObject(raw), null);
 }
 
 export function assertQualityHonored(requested: string, actual: string | null): string {
@@ -186,6 +186,14 @@ async function getToken(): Promise<string> {
   cachedToken = token;
   cachedExp = now + 10 * 60 * 1000;
   return token;
+}
+
+/** Skribble answers JSON; a text body on a 2xx response is an error, never an empty request. */
+function jsonObject(raw: Record<string, unknown> | string): Record<string, unknown> {
+  if (typeof raw === "string") {
+    throw new DomainError("skribble_error", "Skribble hat keine JSON-Antwort geliefert.");
+  }
+  return raw;
 }
 
 async function skribbleFetch(

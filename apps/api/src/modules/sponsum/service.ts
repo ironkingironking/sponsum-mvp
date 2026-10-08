@@ -3575,7 +3575,5 @@ function daysBetween(from: string, to: string): number {
 
 type Offer = import("@sponsum/shared").Offer;
 type Bid = import("@sponsum/shared").Bid;
-type Trade = import("@sponsum/shared").Trade;
-type SettlementInstruction = import("@sponsum/shared").SettlementInstruction;
 type DisclosureGrant = import("@sponsum/shared").DisclosureGrant;
 type PartyKyc = import("@sponsum/shared").PartyKyc;

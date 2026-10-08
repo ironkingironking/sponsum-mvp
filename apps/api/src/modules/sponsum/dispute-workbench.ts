@@ -545,7 +545,7 @@ export function normalizeWorkbench(raw: Partial<DisputeWorkbenchRecord> | undefi
         : null,
     deadline_start: raw.deadline_start ?? null,
     lifecycle: inferLifecycle(raw),
-    close_outcome: isDisputeOutcome(String(raw.close_outcome || "")) ? raw.close_outcome : null,
+    close_outcome: isDisputeOutcome(String(raw.close_outcome || "")) ? (raw.close_outcome as DisputeOutcome) : null,
     closed_at: raw.closed_at ?? null,
     archived_at: raw.archived_at ?? null,
     notes: raw.notes ?? "",
