@@ -403,3 +403,11 @@ dialog.app-dialog p { margin: 0; }
 dialog.app-dialog label { display: grid; gap: 4px; }
 dialog.app-dialog .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 [aria-invalid="true"] { border-color: var(--danger); }
+
+/* SPO-10: Forderungsbuch über die volle Breite, Erfassen aufklappbar */
+details.create-card > summary { cursor: pointer; font-weight: 600; font-size: 15px; }
+details.create-card[open] > summary { margin-bottom: 10px; }
+.book-filters { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: end; margin-bottom: 10px; }
+.book-filters label { display: grid; gap: 4px; font-size: 13px; }
+.table-scroll { overflow-x: auto; }
+td.nowrap, .nowrap { white-space: nowrap; }

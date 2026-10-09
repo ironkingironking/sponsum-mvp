@@ -113,8 +113,96 @@ const STATUS_LABELS = {
   archived: "Archiviert",
   restore: "Forderung wieder freigeben",
   close_asset: "Forderung schliessen",
-  keep: "Forderungsstatus belassen"
+  keep: "Forderungsstatus belassen",
+  PURCHASED_RECEIVABLE: "Kauf ohne Abtretung – Vertrag fehlt",
+  BITCREDIT_EBILL: "Bitcredit-E-Wechsel",
+  FACTOR: "Factoring-Gesellschaft",
+  SME: "KMU",
+  BANK: "Bank",
+  TRANSFER_PENDING: "Übertrag ausstehend"
 };
+
+/** Protokoll-Ereignisse auf Deutsch (SPO-08); unbekannte Codes bleiben lesbar statt roh. */
+const EVENT_LABELS = {
+  RECEIVABLE_CREATED: "Forderung erfasst",
+  RECEIVABLE_VERIFIED: "Nachweise geprüft",
+  OFFER_CREATED: "Angebot erstellt",
+  OFFER_UPDATED: "Angebot geändert",
+  OFFER_WITHDRAWN: "Angebot zurückgezogen",
+  REQUEST_DISCLOSURE: "Offenlegung angefragt",
+  DISCLOSURE_GRANTED: "Offenlegung gewährt",
+  DISCLOSURE_DENIED: "Offenlegung abgelehnt",
+  BID_CREATED: "Gebot abgegeben",
+  BID_UPDATED: "Gebot geändert",
+  BID_WITHDRAWN: "Gebot zurückgezogen",
+  COUNTEROFFER: "Gegenvorschlag",
+  BID_ACCEPTED: "Gebot angenommen",
+  TRADE_CREATED: "Abschluss erstellt",
+  SETTLEMENT_INITIATED: "Zahlung angewiesen",
+  SETTLEMENT_CONFIRMED: "Zahlung bestätigt",
+  ASSIGNMENT_CREATED: "Zessionsvertrag erstellt",
+  ASSET_TRANSFERRED: "Forderung übertragen",
+  WECHSEL_ACKNOWLEDGED: "Wechsel anerkannt",
+  WECHSEL_GUARANTEE_ATTACHED: "Sicherheit am Wechsel",
+  DOCUMENT_SIGNED: "Dokument signiert",
+  DOCUMENT_ANCHORED: "Dokument verankert",
+  CAPITAL_NEED_CREATED: "Kapitalbedarf erfasst",
+  CAPITAL_INTEREST: "Interesse an Kapitalbedarf",
+  CAPITAL_NEED_CONFIRMED: "Kapitalbedarf bestätigt",
+  LENDING_APPLICATION_REQUESTED: "Kreditantrag an Lending",
+  ENDORSEMENT_CREATED: "Indossament erstellt",
+  PAYMENT_RECEIVED: "Zahlung eingegangen",
+  PARTIAL_PAYMENT_RECEIVED: "Teilzahlung eingegangen",
+  DISPUTE_OPENED: "Streitfall eröffnet",
+  DISPUTE_TRACK_UPDATED: "Streitfall nachgeführt",
+  DISPUTE_FORM_DRAFTED: "Schriftsatz-Entwurf erstellt",
+  DISPUTE_BRIEFING_EXPORTED: "Streitdossier exportiert",
+  DISPUTE_CLOSED: "Streitfall abgeschlossen",
+  DISPUTE_ARCHIVED: "Streitfall archiviert",
+  DISPUTE_RESOLVED: "Streitfall erledigt",
+  DEFAULT: "Ausfall",
+  RECOURSE_TRIGGERED: "Regress ausgelöst",
+  MATURITY_REACHED: "Fälligkeit erreicht",
+  ASSET_CLOSED: "Forderung geschlossen"
+};
+
+/**
+ * SPO-04: ohne schriftlichen Zessionsvertrag ist ein bezahlter Übertrag ein Kauf ohne Abtretung, nie eine
+ * «Abgetretene Forderung» (auch für Altbestände, die noch ASSIGNED_RECEIVABLE tragen).
+ */
+function instrumentLabel(asset) {
+  const type = asset?.instrument_type;
+  if (type === "ASSIGNED_RECEIVABLE" && !(workspace?.assignments || []).some((row) => row.receivable_id === asset.receivable_id)) {
+    return labelOf("PURCHASED_RECEIVABLE");
+  }
+  return labelOf(type);
+}
+
+function eventLabel(code) {
+  return EVENT_LABELS[code] || labelOf(code);
+}
+
+/** Buchungsvorschläge: Buchungstexte auf Deutsch (SPO-08). */
+const MEMO_LABELS = {
+  "sale proceeds": "Verkaufserlös",
+  discount: "Diskont",
+  "derecognise receivable": "Ausbuchung der Forderung",
+  "debtor payment": "Zahlung der Schuldnerin",
+  "close investment": "Abschluss des Forderungserwerbs",
+  yield: "Ertrag"
+};
+
+function memoLabel(memo) {
+  return MEMO_LABELS[memo] || memo || "";
+}
+
+const SECTOR_LABELS = { gambling: "Glücksspiel", weapons: "Waffen", tobacco: "Tabak", crypto: "Krypto", industrial: "Industrie" };
+
+/** Wann und von wem: «09.10.2026 14:05 · alice@…» (Protokolle zeigen nie nur die Uhrzeit). */
+function whenWho(iso, who) {
+  const time = String(iso || "").slice(11, 16);
+  return `${formatDate(iso)}${time ? ` ${time}` : ""}${who ? ` · ${esc(who)}` : ""}`;
+}
 
 function labelOf(code) {
   if (code == null || code === "") return "—";
@@ -409,8 +497,18 @@ function allParties() {
   return [...(parties.companies || []), ...(parties.customers || []), ...(workspace?.lendingCustomers || [])];
 }
 
+/** Technische Demo-Parteien heissen in der Oberfläche nie nach ihrer ID (SPO-05). */
+const DEMO_PARTY_LABELS = {
+  "buyer-1": "Testkäufer 1 (Testpartei)",
+  "factor-a": "Factor A (Testpartei)",
+  "party-b": "Partei B (Testpartei)",
+  "factor-c": "Factor C (Testpartei)"
+};
+
 function partyLabel(id) {
   if (!id) return "—";
+  if (id === "seller-ui" || id === "seller-1") return `${preferredCompany() || "Movena GmbH"} (eigene Gesellschaft)`;
+  if (DEMO_PARTY_LABELS[id]) return DEMO_PARTY_LABELS[id];
   const row = allParties().find((item) => item.id === id || item.name === id || item.erp_name === id);
   return row ? row.name : String(id).replace(/^(company|customer):/, "");
 }
@@ -454,7 +552,7 @@ function stammdatenHint() {
   const companies = (parties.companies || []).length;
   const customers = (parties.customers || []).length;
   const source = parties.source === "erpnext" ? "ERPNext" : companies || customers ? "lokaler Bestand" : "nicht geladen";
-  return `<p class="muted">Stammdaten: ${source} · ${companies} Gesellschaft${companies === 1 ? "" : "en"} · ${customers} Debitor${customers === 1 ? "" : "en"} (Customer / Company). Keine Freitexte.</p>`;
+  return `<p class="muted">Stammdaten: ${source} · ${companies} Gesellschaft${companies === 1 ? "" : "en"} · ${customers} Debitor${customers === 1 ? "" : "en"} aus den ERPNext-Stammdaten.</p>`;
 }
 
 function navKey() {
@@ -583,8 +681,8 @@ function eventTable(events) {
           ? events
               .map(
                 (event) => `<tr>
-            <td>${formatDate(event.created_at)} ${String(event.created_at || "").slice(11, 16)}</td>
-            <td>${event.event_type}</td>
+            <td>${whenWho(event.created_at, event.payload?.by)}</td>
+            <td>${esc(eventLabel(event.event_type))}</td>
             <td class="mono">${(event.event_hash || "").slice(0, 14)}</td>
           </tr>`
               )
@@ -1065,6 +1163,74 @@ function renderAssetTable(rows, title, total) {
     </section>`;
 }
 
+/** Forderungsbuch über die volle Breite, mit Suche, Statusfilter und Sortierung (SPO-10). */
+function bookTableHtml(rows) {
+  return `<div class="table-scroll"><table>
+      <thead><tr><th>Forderung</th><th>Rechnung</th><th>Schuldner</th><th class="num">Nominal</th><th>Status</th><th class="num">Prüfung</th><th>Fällig</th></tr></thead>
+      <tbody>${
+        rows.length
+          ? rows
+              .map(
+                (row) => `<tr class="clickable" data-href="#/receivables/${esc(row.receivable_id)}">
+          <td class="nowrap"><a href="#/receivables/${esc(row.receivable_id)}">${esc(row.receivable_id)}</a></td>
+          <td>${esc(row.invoice_id)}</td>
+          <td>${esc(partyLabel(row.debtor_party_id))}</td>
+          <td class="num nowrap">${formatChf(row.nominal_amount, row.currency)}</td>
+          <td>${badge(row.status)}</td>
+          <td class="num">${row.verification_score}/100</td>
+          <td>${formatDue(row.maturity_date, row.status)}</td>
+        </tr>`
+              )
+              .join("")
+          : emptyRow(7, "Keine Forderungen für diese Auswahl.")
+      }</tbody>
+    </table></div>`;
+}
+
+function bindBookFilters() {
+  const host = document.getElementById("book-host");
+  if (!host) return;
+  const query = document.getElementById("book-q");
+  const status = document.getElementById("book-status");
+  const sort = document.getElementById("book-sort");
+  const groups = {
+    open: ["VERIFIED", "ACCEPTED"],
+    offered: ["OFFERED", "TRADE_LOCKED"],
+    disputed: ["DISPUTED", "PARTIALLY_DISPUTED"],
+    done: ["TRANSFERRED", "PAID", "PARTIALLY_PAID", "FINANCED", "CLOSED"]
+  };
+  const draw = () => {
+    const needle = query.value.trim().toLowerCase();
+    const rows = (workspace.receivables || []).filter((row) => {
+      if (status.value === "overdue") {
+        if (DUE_SETTLED.has(String(row.status)) || !(daysUntil(row.maturity_date) < 0)) return false;
+      } else if (status.value && !groups[status.value].includes(row.status)) {
+        return false;
+      }
+      if (!needle) return true;
+      return [row.receivable_id, row.invoice_id, partyLabel(row.debtor_party_id)].some((value) =>
+        String(value || "").toLowerCase().includes(needle)
+      );
+    });
+    const sorted = [...rows].sort((a, b) => {
+      if (sort.value === "amount") return Number(b.nominal_amount) - Number(a.nominal_amount);
+      if (sort.value === "new") return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+      return String(a.maturity_date || "9999").localeCompare(String(b.maturity_date || "9999"));
+    });
+    host.innerHTML = bookTableHtml(sorted);
+    host.querySelectorAll("tr.clickable[data-href]").forEach((row) => {
+      row.addEventListener("click", (event) => {
+        if (event.target.closest("a")) return;
+        window.location.hash = row.getAttribute("data-href");
+      });
+    });
+  };
+  query.addEventListener("input", draw);
+  status.addEventListener("change", draw);
+  sort.addEventListener("change", draw);
+  draw();
+}
+
 function hashQuery() {
   const raw = String(location.hash || "");
   const q = raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "";
@@ -1081,10 +1247,8 @@ function renderReceivables() {
       <a class="btn" href="#/zession">Zession abhandeln</a>
       <a class="btn ghost" href="#/wechsel">Wechsel-Entwurf erstellen</a>
     </div>
-    <div class="grid-2">
-      <div>${renderAssetTable(workspace.receivables, "Buch")}</div>
-      <section class="card">
-        <h2>Neue Forderung aus Rechnung</h2>
+    <details class="card create-card" id="create-card" ${invoicePrefill ? "open" : ""}>
+      <summary>Neue Forderung aus Rechnung erfassen</summary>
         <form class="stack" id="create-form">
           <label>Rechnungsnummer <input name="invoice_id" required placeholder="z. B. RE-10482" value="${esc(invoicePrefill)}" /></label>
           <label class="check"><input type="checkbox" name="from_erpnext" value="1" /> Gebuchte Rechnung aus ERPNext</label>
@@ -1109,9 +1273,33 @@ function renderReceivables() {
           ${stammdatenHint()}
           <button type="submit">Forderung anlegen</button>
         </form>
-      </section>
-    </div>
+    </details>
+    <section class="card">
+      <h2>Buch</h2>
+      <div class="book-filters" role="group" aria-label="Forderungen filtern">
+        <label>Suche <input id="book-q" type="search" placeholder="Forderung, Rechnung oder Schuldner" autocomplete="off" /></label>
+        <label>Status
+          <select id="book-status">
+            <option value="">Alle</option>
+            <option value="open">Offen (geprüft oder akzeptiert)</option>
+            <option value="overdue">Überfällig</option>
+            <option value="offered">Angeboten oder im Abschluss</option>
+            <option value="disputed">Bestritten</option>
+            <option value="done">Übertragen, bezahlt oder geschlossen</option>
+          </select>
+        </label>
+        <label>Sortierung
+          <select id="book-sort">
+            <option value="due">Fälligkeit, älteste zuerst</option>
+            <option value="amount">Nominal, grösste zuerst</option>
+            <option value="new">Zuletzt erfasst zuerst</option>
+          </select>
+        </label>
+      </div>
+      <div id="book-host"></div>
+    </section>
   `;
+  bindBookFilters();
   document.getElementById("create-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.target).entries());
@@ -1186,14 +1374,14 @@ async function renderDossier(id) {
   main.innerHTML = `
     <p><a href="#/receivables">← Forderungen</a></p>
     <h1>${asset.receivable_id}</h1>
-    <p class="lead">Rechnung ${asset.invoice_id} · ${formatChf(asset.nominal_amount, asset.currency)} · Inhaber ${asset.current_holder_party_id}</p>
+    <p class="lead">Rechnung ${asset.invoice_id} · ${formatChf(asset.nominal_amount, asset.currency)} · Inhaberin ${esc(partyLabel(asset.current_holder_party_id))}</p>
     ${errorLine()}
     <div class="kpis">
       <div class="kpi"><strong>${badge(asset.status)}</strong><span>Status</span></div>
       <div class="kpi"><strong>${asset.verification_score}/100</strong><span>Prüfung</span></div>
       <div class="kpi"><strong>${asset.risk_class}</strong><span>Risiko</span></div>
       <div class="kpi"><strong>${badge(dossier.lock.state)}</strong><span>Sperre</span></div>
-      <div class="kpi"><strong>${labelOf(asset.instrument_type)}</strong><span>Instrument</span></div>
+      <div class="kpi"><strong>${esc(instrumentLabel(asset))}</strong><span>Instrument</span></div>
     </div>
     <div class="grid-2">
       ${renderEvidenceCard(asset, checks)}
@@ -1206,24 +1394,29 @@ async function renderDossier(id) {
     </div>
     <section class="card">
       <h2>Aktionen</h2>
+      ${
+        dossier.overdue_days > 0
+          ? `<p class="due-overdue" role="note"><span aria-hidden="true">▲ </span>Seit ${dossier.overdue_days} ${dossier.overdue_days === 1 ? "Tag" : "Tagen"} überfällig: kein Angebot und kein Verkauf. Zuerst Mahnung oder Movena Resolve.</p>`
+          : ""
+      }
       <div class="actions">
-        <button type="button" id="act-liq" ${asset.status === "ACCEPTED" ? "" : "disabled"}>Liquidität beschaffen</button>
-        <button type="button" id="act-sell" ${asset.status === "ACCEPTED" ? "" : "disabled"}>Forderung verkaufen</button>
+        <button type="button" id="act-liq" ${asset.status === "ACCEPTED" && !(dossier.overdue_days > 0) ? "" : "disabled"}>Liquidität beschaffen</button>
+        <button type="button" id="act-sell" ${asset.status === "ACCEPTED" && !(dossier.overdue_days > 0) ? "" : "disabled"}>Forderung verkaufen</button>
         <a class="btn" href="#/zession">Zession abhandeln</a>
         ${
           asset.resolve_case_id
             ? `<a class="btn ghost" href="${disputeHref(asset)}">Streitfall öffnen</a>`
-            : `<button type="button" class="ghost" id="act-dispute">Dispute / Resolve</button>`
+            : `<button type="button" class="ghost" id="act-dispute">Streitfall eröffnen</button>`
         }
       </div>
-      <p class="muted">Bestrittene Forderungen können nicht unbelastet verkauft werden. Transfer nur nach PSP-Webhook.</p>
+      <p class="muted">Bestrittene Forderungen können nicht unbelastet verkauft werden. Übertragen wird erst nach bestätigtem Zahlungseingang.</p>
     </section>
     ${
       liveOffer
         ? `<section class="card" data-testid="sponsum-quotes">
             <h2><a href="#/market/${liveOffer.offer_id}">Angebot ${liveOffer.offer_id}</a> · ${liveOffer.factoring_mode} · ${liveOffer.notice_mode}</h2>
             <p>Mindestpreis ${liveOffer.min_price ? formatChf(liveOffer.min_price, asset.currency) : "–"} · Briefkurs ${liveOffer.ask_price ? formatChf(liveOffer.ask_price, asset.currency) : "–"} · ${badge(liveOffer.status)}</p>
-            <ul>${dossier.bids.map((bid) => `<li>${bid.buyer_party_id} ${formatChf(bid.amount, asset.currency)} ${badge(bid.status)}</li>`).join("")}</ul>
+            <ul>${dossier.bids.map((bid) => `<li>${esc(partyLabel(bid.buyer_party_id))} ${formatChf(bid.amount, asset.currency)} ${badge(bid.status)}</li>`).join("")}</ul>
             ${
               dossier.bids.find((bid) => bid.status === "OPEN")
                 ? `<button type="button" id="act-accept">Bestes Gebot annehmen</button>`
@@ -1250,8 +1443,8 @@ async function renderDossier(id) {
           (row) => `
       <section class="card">
         <h2><a href="#/zession/${row.assignment_id}">Zession ${row.assignment_id}</a></h2>
-        <p>${row.contract_title}<br>${row.transferor_party_id} → ${row.transferee_party_id}<br>
-        ${row.factoring_mode} · ${row.notice_mode} · ${badge(row.status)}</p>
+        <p>${esc(row.contract_title)}<br>${esc(partyLabel(row.transferor_party_id))} → ${esc(partyLabel(row.transferee_party_id))}<br>
+        ${labelOf(row.factoring_mode)} · ${labelOf(row.notice_mode)} · ${badge(row.status)}</p>
         <p class="muted">${row.legal_basis}</p>
         <p>Kaufpreis ${formatChf(row.purchase_price, row.currency)} · Referenz ${row.payment_reference}</p>
       </section>`
@@ -1285,25 +1478,25 @@ async function renderDossier(id) {
     }
     <section class="card">
       <h2>Register / Regress / Adapter</h2>
-      <p>Registerzeilen: ${dossier.registry.map((row) => `${row.status} ${row.transferor_party_id} → ${row.transferee_party_id || "–"}`).join("; ") || "keine"}</p>
-      <p>Bitcredit ${dossier.adapters.bitcredit.ok ? dossier.adapters.bitcredit.ref : dossier.adapters.bitcredit.reason}</p>
-      <p>Registerwertrecht ${dossier.adapters.register_right.ok ? dossier.adapters.register_right.ref : dossier.adapters.register_right.reason}</p>
+      <p>Registerzeilen: ${dossier.registry.map((row) => `${labelOf(row.status)}: ${esc(partyLabel(row.transferor_party_id))} → ${row.transferee_party_id ? esc(partyLabel(row.transferee_party_id)) : "–"}`).join("; ") || "keine"}</p>
+      <p>Bitcredit-E-Wechsel: ${dossier.adapters.bitcredit.ok ? esc(dossier.adapters.bitcredit.ref) : /_disabled$/.test(String(dossier.adapters.bitcredit.reason)) ? "nicht aktiviert" : esc(dossier.adapters.bitcredit.reason)}</p>
+      <p>Registerwertrecht: ${dossier.adapters.register_right.ok ? esc(dossier.adapters.register_right.ref) : /_disabled$/.test(String(dossier.adapters.register_right.reason)) ? "nicht aktiviert" : esc(dossier.adapters.register_right.reason)}</p>
       <p>${labelOf("LEGAL_BILL_OF_EXCHANGE")} ${policyBadge("DENY")} · Aval als Wechselaval ${policyBadge("DENY")}</p>
     </section>
     <section class="card">
-      <h2>Resolve / Enforcement</h2>
+      <h2>Inkasso und Durchsetzung</h2>
       <p>Resolve-Case: ${
         asset.resolve_case_id
           ? `<a href="${disputeHref(asset)}">${asset.resolve_case_id}</a>`
           : "keiner"
       }</p>
-      <p>Nach Fälligkeit: Dunning → Movena Resolve → eSchKG / Justitia.Swiss. Gläubiger = aktueller Inhaber ${asset.current_holder_party_id}.</p>
+      <p>Nach Fälligkeit: Mahnung → Movena Resolve → Betreibung (eSchKG) bzw. Justitia. Gläubigerin ist die aktuelle Inhaberin: ${esc(partyLabel(asset.current_holder_party_id))}.</p>
     </section>
     <section class="card">
       <h2>Protokoll</h2>
       <table><tbody>
         ${dossier.events
-          .map((event) => `<tr><td>${event.created_at.slice(11, 19)}</td><td>${event.event_type}</td><td class="mono">${event.event_hash.slice(0, 12)}</td></tr>`)
+          .map((event) => `<tr><td>${whenWho(event.created_at, event.payload?.by)}</td><td>${esc(eventLabel(event.event_type))}</td><td class="mono" title="Prüfsumme des Protokolleintrags">${event.event_hash.slice(0, 12)}</td></tr>`)
           .join("")}
       </tbody></table>
     </section>
@@ -1411,7 +1604,7 @@ function renderZession() {
             </select>
           </label>
           <label>Zahlungs-IBAN Verkäufer <input name="payee_iban" required placeholder="CH93 0076 2011 6238 5295 7" /></label>
-          <button type="submit">Zessionsvertrag erzeugen &amp; Trade locken</button>
+          <button type="submit">Zessionsvertrag erzeugen und Abschluss sperren</button>
         </form>
         ${assignable.length === 0 ? "<p class=\"muted\">Keine ACCEPTED-Forderung frei. Zuerst Asset erzeugen oder Dispute lösen.</p>" : ""}
       </section>
@@ -1447,7 +1640,7 @@ function renderZession() {
                          <td><a href="${settlementHref(trade)}">${trade.trade_id.slice(0, 12)}</a></td>
                          <td><a href="#/receivables/${trade.receivable_id}">${trade.receivable_id}</a></td>
                          <td class="num">${formatChf(trade.purchase_price, trade.currency)}</td>
-                         <td>${badge(trade.status)}</td>
+                         <td>${badge(trade.status)} <span class="badge warn"><span class="badge-sym" aria-hidden="true">▲</span>Vertrag fehlt</span></td>
                        </tr>`
                      )
                      .join("")}
@@ -1472,7 +1665,7 @@ function renderZession() {
         const id = created && created.assignment && created.assignment.assignment_id;
         window.location.hash = id ? `#/zession/${id}` : "#/settlement";
       }),
-      `Zession über ${formatChf(data.purchase_price)} an ${data.buyer_party_id} abschliessen? Die Forderung wird gesperrt.`
+      `Zession über ${formatChf(data.purchase_price)} an ${partyLabel(data.buyer_party_id)} abschliessen? Die Forderung wird gesperrt.`
     );
   });
   bindClickableRows();
@@ -1879,7 +2072,7 @@ async function renderWechselDossier(id) {
                   </label>
                   <label>IBAN Verkäufer <input name="payee_iban" required placeholder="CH93 0076 2011 6238 5295 7" /></label>
                   ${stammdatenHint()}
-                  <button type="submit">Zedieren und Trade locken</button>
+                  <button type="submit">Zedieren und Abschluss sperren</button>
                 </form>
               </section>`
             : ""
@@ -1992,7 +2185,7 @@ async function renderWechselDossier(id) {
     const data = Object.fromEntries(new FormData(event.target).entries());
     act(
       () => api(`/wechsel-drafts/${draft.instrument_id}/assign`, { method: "POST", body: JSON.stringify(data) }),
-      `Beleg an ${data.buyer_party_id} zedieren?`
+      `Beleg an ${partyLabel(data.buyer_party_id)} zedieren?`
     );
   });
 }
@@ -2150,10 +2343,10 @@ function renderMarket() {
                 <td class="mono"><a href="#/market/${row.offer_id}">${row.offer_id.slice(0, 12)}</a></td>
                 <td class="num">${formatChf(row.nominal_amount, row.currency)}</td>
                 <td>${formatDue(row.maturity_date)}</td>
-                <td>${row.sector === "industrial" ? "Industrie" : row.sector} ${row.country}</td>
+                <td>${esc(SECTOR_LABELS[row.sector] || row.sector)} ${esc(row.country)}</td>
                 <td>${row.risk_class}</td>
                 <td class="num">${row.verification_score}/100</td>
-                <td class="num">${row.min_price ? formatChf(row.min_price, row.currency) : "—"}</td>
+                <td class="num">${row.overdue_days > 0 ? `<span class="due-overdue">überfällig, keine Gebote</span>` : row.min_price ? formatChf(row.min_price, row.currency) : "—"}</td>
                 <td>${row.dispute === "none" ? "keiner" : "ja"}</td>
               </tr>`
                   )
@@ -2185,14 +2378,14 @@ function renderMarket() {
       </table>
     </section>
     <section class="card">
-      <h2>Factor- / Institution Nodes</h2>
+      <h2>Factoring- und Finanzierungspartner</h2>
       <table>
-        <thead><tr><th>Node</th><th>Typ</th><th>Status</th><th>Währung</th><th>Ticket</th><th>Pricing API</th></tr></thead>
+        <thead><tr><th>Partner</th><th>Typ</th><th>Status</th><th>Währung</th><th>Ticket</th><th>Preisschnittstelle</th></tr></thead>
         <tbody>
           ${workspace.factors
             .map(
               (row) => `<tr class="clickable" data-href="#/factors/${row.node_id}">
-                <td><a href="#/factors/${row.node_id}">${row.node_id}</a></td><td>${row.kind}</td><td>${row.regulatory_status}</td>
+                <td><a href="#/factors/${row.node_id}">${esc(partyLabel(row.node_id))}</a></td><td>${labelOf(row.kind)}</td><td>${esc(labelOf(row.regulatory_status))}</td>
                 <td>${row.currencies.join(", ")}</td><td class="num">${formatChf(row.min_invoice)}–${formatChf(row.max_invoice)}</td>
                 <td>${row.pricing_api ? "ja" : "nein"}</td>
               </tr>`
@@ -2215,7 +2408,7 @@ async function renderOfferDetail(offerId) {
     ${errorLine()}
     <section class="card">
       <h2>Stufe 0 — öffentlich</h2>
-      <p>${formatChf(view.l0.nominal_amount, view.l0.currency)} · Fällig ${formatDue(view.l0.maturity_date)} · ${view.l0.sector === "industrial" ? "Industrie" : view.l0.sector} ${view.l0.country}</p>
+      <p>${formatChf(view.l0.nominal_amount, view.l0.currency)} · Fällig ${formatDue(view.l0.maturity_date)} · ${esc(SECTOR_LABELS[view.l0.sector] || view.l0.sector)} ${esc(view.l0.country)}</p>
       <p>Risiko ${view.l0.risk_class} · Prüfung ${view.l0.verification_score}/100 · Mindestpreis ${view.l0.min_price ? formatChf(view.l0.min_price, view.l0.currency) : "—"} · Streit ${view.l0.dispute === "none" ? "keiner" : "ja"}</p>
       <p>${labelOf(view.l0.factoring_mode)} · ${labelOf(view.l0.notice_mode)} · ${badge(view.offer.status)}</p>
     </section>
@@ -2223,7 +2416,7 @@ async function renderOfferDetail(offerId) {
       <h2>Stufe 1 — interessierter Käufer</h2>
       ${
         view.l1
-          ? `<p>Schuldner <strong>${view.l1.debtor_party_id}</strong><br>Rechnung ${view.l1.invoice_id}<br>Verkäufer ${view.l1.seller_party_id}<br>Offen ${formatChf(view.l1.outstanding_amount)} · akzeptiert ${formatChf(view.l1.accepted_amount)}</p>`
+          ? `<p>Schuldner <strong>${esc(partyLabel(view.l1.debtor_party_id))}</strong><br>Rechnung ${esc(view.l1.invoice_id)}<br>Verkäufer ${esc(partyLabel(view.l1.seller_party_id))}<br>Offen ${formatChf(view.l1.outstanding_amount)} · akzeptiert ${formatChf(view.l1.accepted_amount)}</p>`
           : `<p class="muted">Noch nicht freigegeben.</p><button type="button" id="req-l1">Stufe 1 anfordern</button>`
       }
     </section>
@@ -2231,7 +2424,7 @@ async function renderOfferDetail(offerId) {
       <h2>Stufe 2 — Prüfung</h2>
       ${
         view.l2
-          ? `<p>Asset ${view.l2.receivable_id}<br>Instrument ${view.l2.instrument_type}<br>Lock ${view.l2.lock.state}<br><span class="mono">${view.l2.content_hash}</span></p>
+          ? `<p>Asset ${view.l2.receivable_id}<br>Instrument ${esc(instrumentLabel(view.l2))}<br>Sperre ${labelOf(view.l2.lock.state)}<br><span class="mono">${view.l2.content_hash}</span></p>
              <p><a href="#/receivables/${view.l2.receivable_id}">Zum Dossier</a></p>`
           : `<p class="muted">Vertrag, Liefernachweis und Kommunikation erst nach Zustimmung des Verkäufers.</p>
              ${view.level >= 1 ? `<button type="button" id="req-l2">Stufe 2 anfordern</button>` : ""}`
@@ -2244,7 +2437,7 @@ async function renderOfferDetail(offerId) {
         <label>Betrag <input name="amount" inputmode="decimal" required placeholder="${formatChf(min)}" /></label>
         <button type="submit">Gebot senden</button>
       </form>
-      <ul>${(view.bids || []).map((bid) => `<li>${bid.buyer_party_id} ${bid.amount} ${badge(bid.status)}</li>`).join("")}</ul>
+      <ul>${(view.bids || []).map((bid) => `<li>${esc(partyLabel(bid.buyer_party_id))} ${formatChf(bid.amount)} ${badge(bid.status)}</li>`).join("")}</ul>
     </section>
   `;
   const req1 = document.getElementById("req-l1");
@@ -2266,15 +2459,13 @@ function renderPortfolio() {
   const book = workspace.portfolio;
   main.innerHTML = `
     <h1>Käufer-Portfolio</h1>
+    <p class="lead">Positionen von ${esc(partyLabel(book.buyer_party_id || "buyer-1"))}.</p>
     <div class="kpis">
-      <div class="kpi"><strong>${formatChf(book.invested)}</strong><span>Investiert</span></div>
-      <div class="kpi"><strong>${formatChf(book.outstanding_nominal)}</strong><span>Nominal offen</span></div>
-      <div class="kpi"><strong>${formatChf(book.expected_income)}</strong><span>Erwarteter Ertrag</span></div>
+      <div class="kpi" data-testid="sponsum-portfolio-invested"><strong>${formatChf(book.invested)}</strong><span>Investiert</span></div>
+      <div class="kpi" data-testid="sponsum-portfolio-outstanding"><strong>${formatChf(book.outstanding_nominal)}</strong><span>Nominal offen</span></div>
+      <div class="kpi" data-testid="sponsum-portfolio-income"><strong>${formatChf(book.expected_income)}</strong><span>Erwarteter Ertrag</span></div>
     </div>
     <section class="card" data-testid="sponsum-portfolio">
-      <p data-testid="sponsum-portfolio-invested">Investiert ${formatChf(book.invested)}</p>
-      <p data-testid="sponsum-portfolio-outstanding">Nominal offen ${formatChf(book.outstanding_nominal)}</p>
-      <p data-testid="sponsum-portfolio-income">Erwarteter Ertrag ${formatChf(book.expected_income)}</p>
       <table>
         <thead><tr><th>Forderung</th><th>Schuldner</th><th class="num">Offen</th><th>Status</th><th>Risiko</th></tr></thead>
         <tbody>
@@ -2283,7 +2474,7 @@ function renderPortfolio() {
               ? book.items
                   .map(
                     (item) =>
-                      `<tr><td><a href="#/receivables/${item.receivable_id}">${item.receivable_id}</a></td><td>${item.debtor_party_id}</td><td class="num">${formatChf(item.outstanding_amount)}</td><td>${badge(item.status)}</td><td>${item.risk_class}</td></tr>`
+                      `<tr><td><a href="#/receivables/${item.receivable_id}">${item.receivable_id}</a></td><td>${esc(partyLabel(item.debtor_party_id))}</td><td class="num">${formatChf(item.outstanding_amount)}</td><td>${badge(item.status)}</td><td>${item.risk_class}</td></tr>`
                   )
                   .join("")
               : emptyRow(5, "Keine Positionen.")
@@ -2389,7 +2580,7 @@ function renderDisputes() {
   const tab = (id, label, count) =>
     `<a href="#/disputes?view=${id}" class="${view === id ? "is-on" : ""}">${label} (${count})</a>`;
   main.innerHTML = `
-    <h1>Dispute</h1>
+    <h1>Streitfälle</h1>
     <p class="lead">Zwei Spuren, ein Dossier: aussergerichtlich (Verhandlung, Mediation, Resolve) und staatlich (eSchKG, Justitia). Keine parallele Gerichtsakte.</p>
     ${errorLine()}
     <div class="kpis">
@@ -2485,7 +2676,7 @@ async function renderDisputeDossier(id) {
   try {
     pack = await api(`/disputes/${encodeURIComponent(id)}`);
   } catch (error) {
-    main.innerHTML = notFoundCard("Streitfall", error.message, "#/disputes", "Dispute");
+    main.innerHTML = notFoundCard("Streitfall", error.message, "#/disputes", "Streitfälle");
     return;
   }
   const dispute = pack.dispute;
@@ -2498,7 +2689,7 @@ async function renderDisputeDossier(id) {
   main.innerHTML = `
     <p class="muted"><a href="#/disputes">← Dispute</a> · <a href="#/receivables/${asset.receivable_id}">Forderung</a></p>
     <h1>${esc(dispute.resolve_case_id || dispute.dispute_id)}</h1>
-    <p class="lead">Rechnung ${esc(asset.invoice_id)} · ${formatChf(asset.nominal_amount, asset.currency)} · ${badge(asset.status)} · Fall ${badge(bench.lifecycle || "open")}. Inhaber ${esc(partyLabel(asset.current_holder_party_id))} (Holder gewinnt).</p>
+    <p class="lead">Rechnung ${esc(asset.invoice_id)} · ${formatChf(asset.nominal_amount, asset.currency)} · ${badge(asset.status)} · Fall ${badge(bench.lifecycle || "open")}. Inhaber ${esc(partyLabel(asset.current_holder_party_id))} .</p>
     ${errorLine()}
     <div class="kpis">
       <div class="kpi"><strong>${formatChf(asset.nominal_amount, asset.currency)}</strong><span>Nominal</span></div>
@@ -2524,7 +2715,7 @@ async function renderDisputeDossier(id) {
       </section>
       <section class="card">
         <h2>Staatlich · Justitia / eSchKG</h2>
-        <p class="muted">Justitia bleibt Sendungs-SoR. Die Suite orchestriert nur. Kein Auto-Receive, kein PROD-Submit.</p>
+        <p class="muted">Zustellungen und Eingaben laufen über Justitia. Movena holt nichts automatisch ab und reicht nichts ohne Ihre Bestätigung ein.</p>
         <form id="court-form" class="stack">
           <label>Stufe
             <select name="court_stage">
@@ -2549,10 +2740,10 @@ async function renderDisputeDossier(id) {
     ${renderFulfilmentCard(pack.fulfilment)}
     <section class="card">
       <h2>Stammdaten und Verknüpfungen</h2>
-      <p class="muted">Diese Sätze fliessen in den Formulargenerator. Inhaber gewinnt gegen Origin-Gläubiger.</p>
+      <p class="muted">Diese Sätze fliessen in den Formulargenerator. Massgebend ist die aktuelle Inhaberin, nicht die ursprüngliche Gläubigerin.</p>
       <p><strong>Schuldnerin</strong> ${esc(partyLabel(asset.debtor_party_id))}<br>
       <strong>Inhaberin</strong> ${esc(partyLabel(asset.current_holder_party_id))}<br>
-      <strong>Origin-Gläubigerin</strong> ${esc(partyLabel(asset.creditor_party_id))}</p>
+      <strong>Ursprüngliche Gläubigerin</strong> ${esc(partyLabel(asset.creditor_party_id))}</p>
       <div class="links">${(bench.links || []).map((link) => `<span class="chip">${esc(link.doctype)}: ${esc(link.label)}</span>`).join("") || "<span class='muted'>Noch keine zusätzlichen Verknüpfungen</span>"}</div>
       <form id="link-form" class="stack" action="#" method="post">
         <label>Datensatz verknüpfen
@@ -2570,7 +2761,7 @@ async function renderDisputeDossier(id) {
         <h2>Formulargenerator</h2>
         <p class="muted">Entwürfe für Rechtsschriften und Repliken. Gerichtsstand und Fristen stehen oben unabhängig vom Schreiben. ${
           pack.form_ai?.enabled
-            ? `OpenAI (${esc(pack.form_ai.model)}) aus den Suite-OCR-Settings. Kein Rechtsrat.`
+            ? "KI-Entwurf mit OpenAI möglich (siehe Hinweis unten). Kein Rechtsrat."
             : "OpenAI ist nicht konfiguriert — es bleibt der Vorlagentext. Kein Rechtsrat."
         }</p>
         <form id="form-gen" class="stack" action="#" method="post">
@@ -2601,7 +2792,7 @@ async function renderDisputeDossier(id) {
             ? `<ul class="plain-list">${forms
                 .map(
                   (row) =>
-                    `<li>${esc(row.title)} · ${row.source === "openai" ? "OpenAI" : "Vorlage"} <button type="button" class="linkish" data-form-pdf="${row.id}">PDF</button></li>`
+                    `<li>${esc(row.title)} · ${row.source === "openai" ? "KI-Entwurf" : "Vorlage"} · ${whenWho(row.created_at, row.created_by)} <button type="button" class="linkish" data-form-pdf="${row.id}">PDF</button></li>`
                 )
                 .join("")}</ul>`
             : ""
@@ -2631,7 +2822,7 @@ async function renderDisputeDossier(id) {
     </div>
     <section class="card">
       <h2>Fallkontext</h2>
-      <p>Schuldner ${esc(partyLabel(asset.debtor_party_id))} · Origin-Gläubiger ${esc(partyLabel(asset.creditor_party_id))} · Inhaber ${esc(partyLabel(asset.current_holder_party_id))}</p>
+      <p>Schuldner ${esc(partyLabel(asset.debtor_party_id))} · ursprüngliche Gläubigerin ${esc(partyLabel(asset.creditor_party_id))} · Inhaber ${esc(partyLabel(asset.current_holder_party_id))}</p>
       <p class="muted">${esc(bench.notes || "Resolve bleibt getrennt vom Risk Score.")}</p>
       <div class="actions">
         <a class="btn ghost" href="#/receivables/${asset.receivable_id}">Forderungsdossier</a>
@@ -2834,7 +3025,7 @@ async function renderSettlementDossier(id) {
         <p>Forderung <a href="#/receivables/${trade.receivable_id}">${trade.receivable_id}</a><br>
         Rechnung ${pack.asset.invoice_id} · ${badge(pack.asset.status)}</p>
         ${pack.offer ? `<p>Angebot <a href="#/market/${pack.offer.offer_id}">${pack.offer.offer_id}</a> · ${badge(pack.offer.status)}</p>` : ""}
-        ${pack.bid ? `<p>Gebot ${pack.bid.buyer_party_id} ${formatChf(pack.bid.amount, trade.currency)} ${badge(pack.bid.status)}</p>` : ""}
+        ${pack.bid ? `<p>Gebot ${esc(partyLabel(pack.bid.buyer_party_id))} ${formatChf(pack.bid.amount, trade.currency)} ${badge(pack.bid.status)}</p>` : ""}
         ${
           pack.assignment
             ? `<p>Zession <a href="#/zession/${pack.assignment.assignment_id}">${pack.assignment.assignment_id}</a> ${badge(pack.assignment.status)}</p>`
@@ -2946,7 +3137,7 @@ function renderAccounting() {
       <section class="card">
         <h2><a href="#/accounting/${row.proposal_id}">${row.proposal_id}</a> · ${row.standard} · ${badge(row.status)}</h2>
         <table>
-          ${row.lines.map((line) => `<tr><td>${line.account}</td><td class="num">Soll ${formatChf(line.debit)}</td><td class="num">Haben ${formatChf(line.credit)}</td><td>${line.memo}</td></tr>`).join("")}
+          ${row.lines.map((line) => `<tr><td>${line.account}</td><td class="num">Soll ${formatChf(line.debit)}</td><td class="num">Haben ${formatChf(line.credit)}</td><td>${esc(memoLabel(line.memo))}</td></tr>`).join("")}
         </table>
         <p><a href="#/accounting/${row.proposal_id}">Dossier öffnen</a></p>
       </section>`
@@ -2957,7 +3148,7 @@ function renderAccounting() {
 
 function renderRisk() {
   main.innerHTML = `
-    <h1>Risk Engine</h1>
+    <h1>Risiko</h1>
     <p class="lead">Risk Score und rechtliche Qualifikation bleiben getrennt.</p>
     <section class="card">
       <table>
@@ -2971,7 +3162,7 @@ function renderRisk() {
                 <td class="num">${row.verification_score}/100</td>
                 <td class="num">${formatChf(row.disputed_amount)}</td>
                 <td>${formatDue(row.maturity_date, row.status)}</td>
-                <td>${labelOf(row.instrument_type)}</td>
+                <td>${esc(instrumentLabel(row))}</td>
               </tr>`
             )
             .join("")}
@@ -3035,8 +3226,8 @@ function renderProtocol() {
                   ? ` · <a href="#/market/${event.offer_id}">Angebot</a>`
                   : "";
               return `<tr>
-                <td>${formatDate(event.created_at)} ${String(event.created_at).slice(11, 16)}</td>
-                <td>${event.event_type}</td>
+                <td>${whenWho(event.created_at, event.payload?.by)}</td>
+                <td>${esc(eventLabel(event.event_type))}</td>
                 <td>${asset}${extra}</td>
                 <td class="mono">${event.event_hash.slice(0, 14)}</td>
                 <td class="mono">${(event.prev_event_hash || "genesis").slice(0, 10)}</td>
@@ -3058,7 +3249,7 @@ function renderIdentity() {
         ${workspace.kyc
           .map(
             (row) => `<tr class="clickable" data-href="#/identity/${encodeURIComponent(row.party_id)}">
-          <td><a href="#/identity/${encodeURIComponent(row.party_id)}">${esc(row.party_id)}</a></td>
+          <td><a href="#/identity/${encodeURIComponent(row.party_id)}">${esc(partyLabel(row.party_id))}</a></td>
           <td>${badge(row.status)}</td>
         </tr>`
           )
@@ -3069,7 +3260,7 @@ function renderIdentity() {
       <h2>Investment-Profil</h2>
       ${workspace.buyer_profiles
         .map(
-          (row) => `<p><a href="#/identity/${encodeURIComponent(row.party_id)}">${esc(row.party_id)}</a>: ${row.country} ${row.currency}, Rating ≥ ${row.min_debtor_rating}, max. ${row.max_maturity_days} Tage, max. ${formatChf(row.max_single_position, row.currency)}, min. ${row.min_expected_yield}% · ausgeschlossen: ${row.sector_exclusions.join(", ") || "–"}</p>`
+          (row) => `<p><a href="#/identity/${encodeURIComponent(row.party_id)}">${esc(partyLabel(row.party_id))}</a>: ${esc(row.country)} ${esc(row.currency)}, Rating ≥ ${esc(row.min_debtor_rating)}, max. ${esc(row.max_maturity_days)} Tage, max. ${formatChf(row.max_single_position, row.currency)}, min. ${esc(row.min_expected_yield)} % Rendite · ausgeschlossene Branchen: ${row.sector_exclusions.map((sector) => SECTOR_LABELS[sector] || sector).join(", ") || "–"}</p>`
         )
         .join("")}
       <p class="muted">Profile dienen der Suche und dem Abgleich. Automatische Käufe bleiben gesperrt.</p>
@@ -3313,7 +3504,7 @@ async function renderLombard() {
             }
           </tbody>
         </table>
-        <p class="muted">Quelle LENDING · Loan Security / Loan Security Price. Kurse täglich; ohne gültigen Kurs ist eine Sicherheit nicht belehnbar.</p>
+        <p class="muted">Quelle: Frappe Lending (Sicherheiten und Tageskurse). Ohne gültigen Kurs ist eine Sicherheit nicht belehnbar.</p>
       </section>
       <section class="card">
         <h2>Antrag</h2>
@@ -3571,7 +3762,7 @@ async function renderAccountingDossier(id) {
         ${row.lines
           .map(
             (line) =>
-              `<tr><td>${esc(line.account)}</td><td class="num">Soll ${formatChf(line.debit)}</td><td class="num">Haben ${formatChf(line.credit)}</td><td>${esc(line.memo)}</td></tr>`
+              `<tr><td>${esc(line.account)}</td><td class="num">Soll ${formatChf(line.debit)}</td><td class="num">Haben ${formatChf(line.credit)}</td><td>${esc(memoLabel(line.memo))}</td></tr>`
           )
           .join("")}
       </table>
@@ -3647,13 +3838,13 @@ async function renderFactorDossier(id) {
   const node = pack.node;
   main.innerHTML = `
     <p class="muted"><a href="#/market">← Marktplatz</a> · <a href="#/identity/${encodeURIComponent(node.node_id)}">Identität</a></p>
-    <h1>${esc(node.node_id)}</h1>
+    <h1>${esc(partyLabel(node.node_id))}</h1>
     <p class="lead">${esc(node.kind)} · ${esc(node.regulatory_status)} · ${esc(node.jurisdiction)}</p>
     ${errorLine()}
     <section class="card">
       <h2>Ticket</h2>
       <p>${formatChf(node.min_invoice)}–${formatChf(node.max_invoice)} · ${node.currencies.join(", ")}</p>
-      <p>Pricing API: ${node.pricing_api ? "ja" : "nein"} · KYC ${pack.kyc ? badge(pack.kyc.status) : badge("NONE")}</p>
+      <p>Preisschnittstelle: ${node.pricing_api ? "ja" : "nein"} · KYC ${pack.kyc ? badge(pack.kyc.status) : badge("NONE")}</p>
     </section>
     <section class="card">
       <h2>Abschlüsse</h2>
