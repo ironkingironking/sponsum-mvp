@@ -143,7 +143,10 @@ test("offer and sale re-check the Sales Invoice: paid or cancelled in ERPNext me
   const service = new SponsumService();
   const mock = erp(service);
   service.setKyc(SEEKER, "PASSED");
-  const asset = await linked(service);
+  const created = await linked(service);
+  // ERPNext belegt Rechnung und offenen Betrag; Vertrag, Lieferung und KYC bestätigt erst eine Person (SPO-02).
+  assert.equal(created.status, "VERIFIED");
+  const asset = service.verify(created.receivable_id, FULL);
   assert.equal(asset.status, "ACCEPTED");
   // Without the live check the step refuses to run.
   assert.throws(() => service.createOffer(asset.receivable_id, { seller_party_id: SEEKER }), domainCode("invoice_check_required"));
@@ -352,4 +355,62 @@ test("settlement webhook: unsigned reports never settle, whatever the body says"
   assert.equal(service.applySettlementWebhook({ provider: "psp", ...report, signed: true }).transferred, true);
   assert.equal(settlementWebhookSecret({ SPONSUM_SETTLEMENT_WEBHOOK_SECRET_FILE: "/x" }, () => "short"), null);
   assert.equal(settlementWebhookSecret({}, () => secret), null);
+});
+
+
+// SPO-02 (UX-Test 2026-10-09): evidence from the request never counts as proven.
+
+test("a manual receivable ignores evidence claims from the request; only risk flags are taken", async () => {
+  const service = new SponsumService(new MemorySponsumStore());
+  const asset = await inScope(alice, () =>
+    service.submitReceivable({
+      ...input("RE-700", "seller-ui"),
+      evidence: { ...FULL, debtorAcknowledged: true, hasAcceptance: true, hasPreviousAssignment: true }
+    })
+  );
+  assert.equal(asset.status, "UNVERIFIED");
+  const checks = inScope(alice, () => service.dossier(asset.receivable_id)).verification?.checks;
+  assert.ok(checks);
+  for (const key of ["contract", "delivery_evidence", "debtor_acknowledged", "acceptance", "debtor_kyc", "creditor_kyc", "invoice", "unpaid"]) {
+    assert.equal(checks[key as keyof typeof checks], false, key);
+  }
+  assert.equal(checks.no_previous_assignment, false);
+  assert.ok(asset.verification_score < 40);
+});
+
+test("a manual receivable needs real issue and maturity dates", async () => {
+  const service = new SponsumService(new MemorySponsumStore());
+  const base = input("RE-701", "seller-ui");
+  await assert.rejects(
+    inScope(alice, () => service.submitReceivable({ ...base, issue_date: "", maturity_date: "2026-10-01" })),
+    domainCode("validation_error")
+  );
+  await assert.rejects(
+    inScope(alice, () => service.submitReceivable({ ...base, issue_date: "31.02.2026", maturity_date: "2026-10-01" })),
+    domainCode("validation_error")
+  );
+  await assert.rejects(
+    inScope(alice, () => service.submitReceivable({ ...base, issue_date: "2026-10-02", maturity_date: "2026-10-01" })),
+    domainCode("validation_error")
+  );
+  const ok = await inScope(alice, () => service.submitReceivable({ ...base, issue_date: "01.09.2026", maturity_date: "30.11.2026" }));
+  assert.equal(ok.issue_date, "2026-09-01");
+  assert.equal(ok.maturity_date, "2026-11-30");
+});
+
+test("verify takes only what a person attests and records who it was", async () => {
+  const service = new SponsumService(new MemorySponsumStore());
+  const asset = await inScope(alice, () => service.submitReceivable(input("RE-702", "seller-ui")));
+  assert.equal(asset.status, "UNVERIFIED");
+  // too little attested: stays below the thresholds
+  const weak = inScope(alice, () => service.verify(asset.receivable_id, { unpaid: true, hasInvoice: true }));
+  assert.equal(weak.status, "UNVERIFIED");
+  const strong = inScope(alice, () =>
+    service.verify(asset.receivable_id, { ...FULL, debtorAcknowledged: true, hasAcceptance: true })
+  );
+  assert.equal(strong.status, "ACCEPTED");
+  const event = inScope(alice, () => service.dossier(asset.receivable_id))
+    .events.filter((row) => row.event_type === "RECEIVABLE_VERIFIED")
+    .pop();
+  assert.equal((event?.payload as { attested_by?: string } | undefined)?.attested_by, "alice@example.test");
 });

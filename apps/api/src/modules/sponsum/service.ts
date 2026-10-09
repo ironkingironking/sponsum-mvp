@@ -176,8 +176,15 @@ export class SponsumService {
     const body = { ...(input ?? {}) } as CreateReceivableInput;
     if (body.sales_invoice === undefined || body.sales_invoice === null || String(body.sales_invoice).trim() === "") {
       delete body.sales_invoice;
+      body.issue_date = requiredIsoDate(body.issue_date, "Ausstellungsdatum");
+      body.maturity_date = requiredIsoDate(body.maturity_date, "Fälligkeitsdatum");
+      if (body.maturity_date < body.issue_date) {
+        throw new DomainError("validation_error", "Das Fälligkeitsdatum liegt vor dem Ausstellungsdatum.");
+      }
+      body.evidence = requestEvidence(body.evidence, "manual");
       return this.createReceivable(body);
     }
+    body.evidence = requestEvidence(body.evidence, "erpnext");
     const invoice = await readOpenSalesInvoice(String(body.sales_invoice), this.lendingDeps());
     return verifiedInvoices.run(new Map([[`new:${invoice.name}`, invoice]]), () =>
       this.createReceivable({ ...body, sales_invoice: invoice.name })
@@ -433,21 +440,35 @@ export class SponsumService {
     return asset;
   }
 
+  /**
+   * Prüfnachweise bestätigen (SPO-02). Positive Nachweise gelten nur, wenn eine angemeldete Person sie hier
+   * ausdrücklich bestätigt; die Person steht im Ereignis. Was ERPNext belegt (Rechnung, offen), bleibt erfüllt.
+   * Status wie beim Anlegen: ab 40 Punkten «Verifiziert», ab 50 ohne Streit und offen «Akzeptiert».
+   */
   verify(id: string, evidence: VerificationEvidence): ReceivableAsset {
     const state = this.store.snapshot();
     const asset = mustAsset(state, id);
-    const checks = buildVerificationChecks(evidence);
+    const attested = attestedEvidence(evidence);
+    const checks = buildVerificationChecks(
+      asset.sales_invoice ? { ...attested, hasInvoice: true, invoiceElectronic: true, unpaid: true } : attested
+    );
     const score = scoreVerification(checks);
     asset.verification_score = score;
-    let next: ReceivableStatus = asset.status;
-    if (asset.status === "UNVERIFIED") next = "VERIFIED";
-    if (next === "VERIFIED" && checks.no_dispute && checks.unpaid) next = "ACCEPTED";
-    if (!checks.no_dispute) next = Number(asset.disputed_amount) > 0 ? "PARTIALLY_DISPUTED" : "DISPUTED";
-    if (next !== asset.status) {
+    const path: ReceivableStatus[] = [];
+    if (!checks.no_dispute) {
+      path.push(Number(asset.disputed_amount) > 0 ? "PARTIALLY_DISPUTED" : "DISPUTED");
+    } else {
+      if (asset.status === "UNVERIFIED" && score >= 40) path.push("VERIFIED");
+      const reached = path.length ? path[path.length - 1] : asset.status;
+      if (reached === "VERIFIED" && score >= 50 && checks.unpaid) path.push("ACCEPTED");
+    }
+    for (const next of path) {
+      if (next === asset.status) continue;
       assertTransition(RECEIVABLE_TRANSITIONS, asset.status, next, "receivable");
       asset.status = next;
     }
     asset.updated_at = new Date().toISOString();
+    const who = principal();
     state.verifications.push({
       id: `ver-${randomUUID()}`,
       receivable_id: id,
@@ -458,7 +479,8 @@ export class SponsumService {
     this.appendEvent(state, {
       type: "RECEIVABLE_VERIFIED",
       receivable_id: id,
-      payload: { score, checks }
+      actor: who ? who.email || who.userId : null,
+      payload: { score, checks, attested_by: who ? who.email || who.userId : null }
     });
     this.store.replace(state);
     return asset;
@@ -3550,6 +3572,66 @@ function fromSalesInvoice(input: CreateReceivableInput, invoice: OpenSalesInvoic
     maturity_date: invoice.due_date || input.maturity_date,
     evidence: { ...evidence, hasInvoice: true, unpaid: true }
   };
+}
+
+const POSITIVE_EVIDENCE = [
+  "hasContract",
+  "hasPurchaseOrder",
+  "hasInvoice",
+  "invoiceElectronic",
+  "hasPerformance",
+  "hasDelivery",
+  "hasAcceptance",
+  "debtorAcknowledged",
+  "unpaid",
+  "debtorKyc",
+  "creditorKyc",
+  "hasCreditInfo",
+  "hasHistoricalPayments",
+  "hasPaymentBehavior",
+  "documentIntegrity"
+] as const;
+const RISK_EVIDENCE = ["hasDispute", "hasPreviousAssignment", "hasKnownSetoffs", "hasCreditNotes"] as const;
+
+/**
+ * SPO-02: Nachweise beim Anlegen kommen nie aus dem Request. Ohne Beleg gilt ein Nachweis als offen. Nur Angaben, die
+ * das Risiko erhöhen (Streit, frühere Abtretung, Verrechnung, Gutschriften), werden übernommen. Bei einer gebuchten
+ * ERPNext-Rechnung belegt die Quelle Rechnung, elektronische Form und offenen Betrag.
+ */
+export function requestEvidence(raw: unknown, source: "manual" | "erpnext"): VerificationEvidence {
+  const given = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const evidence: VerificationEvidence = {};
+  for (const key of POSITIVE_EVIDENCE) evidence[key] = false;
+  for (const key of RISK_EVIDENCE) evidence[key] = given[key] === true;
+  if (source === "erpnext") {
+    evidence.hasInvoice = true;
+    evidence.invoiceElectronic = true;
+    evidence.unpaid = true;
+    evidence.documentIntegrity = true;
+  }
+  return evidence;
+}
+
+/** Nachweise, die eine Person in «Nachweise bestätigen» ausdrücklich angehakt hat; nur echte true-Werte zählen. */
+function attestedEvidence(raw: unknown): VerificationEvidence {
+  const given = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const evidence: VerificationEvidence = {};
+  for (const key of POSITIVE_EVIDENCE) evidence[key] = given[key] === true;
+  for (const key of RISK_EVIDENCE) evidence[key] = given[key] === true;
+  return evidence;
+}
+
+/** Pflichtdatum als echtes Kalenderdatum (YYYY-MM-DD oder TT.MM.JJJJ). */
+function requiredIsoDate(value: unknown, label: string): string {
+  const raw = String(value ?? "").trim();
+  const ch = raw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  const iso = ch ? `${ch[3]}-${ch[2].padStart(2, "0")}-${ch[1].padStart(2, "0")}` : raw;
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const date = match ? new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))) : null;
+  if (!match || !date || date.getUTCMonth() !== Number(match[2]) - 1 || date.getUTCDate() !== Number(match[3])) {
+    throw new DomainError("validation_error", `${label}: bitte ein gültiges Datum als TT.MM.JJJJ angeben.`);
+  }
+  return iso;
 }
 
 /** Invoice numbers compare without case and surrounding/inner whitespace. */

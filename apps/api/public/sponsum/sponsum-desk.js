@@ -121,6 +121,70 @@ function labelOf(code) {
   return STATUS_LABELS[code] || String(code).replaceAll("_", " ");
 }
 
+/** TT.MM.JJJJ → YYYY-MM-DD, nur echte Kalenderdaten; sonst "". */
+function chDateToIso(value) {
+  const match = String(value || "").trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (!match) return "";
+  const [day, month, year] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return "";
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** Prüfnachweise: Schlüssel der Prüfung → deutsche Bezeichnung und Feld im Bestätigen-Formular. */
+const EVIDENCE_ITEMS = [
+  ["contract", "Vertrag", "hasContract"],
+  ["purchase_order", "Bestellung", "hasPurchaseOrder"],
+  ["invoice", "Rechnung", "hasInvoice"],
+  ["invoice_electronic", "Rechnung elektronisch", "invoiceElectronic"],
+  ["performance_documented", "Leistung dokumentiert", "hasPerformance"],
+  ["delivery_evidence", "Lieferung belegt", "hasDelivery"],
+  ["acceptance", "Abnahme", "hasAcceptance"],
+  ["debtor_acknowledged", "Anerkennung durch den Schuldner", "debtorAcknowledged"],
+  ["no_dispute", "Kein Streit", null],
+  ["no_previous_assignment", "Keine frühere Abtretung", null],
+  ["unpaid", "Offen (unbezahlt)", "unpaid"],
+  ["debtor_kyc", "KYC Schuldner", "debtorKyc"],
+  ["creditor_kyc", "KYC Gläubiger", "creditorKyc"],
+  ["credit_info", "Bonitätsauskunft", "hasCreditInfo"],
+  ["historical_payments", "Zahlungshistorie", "hasHistoricalPayments"],
+  ["payment_behavior", "Zahlungsverhalten", "hasPaymentBehavior"],
+  ["known_setoffs", "Keine bekannte Verrechnung", null],
+  ["credit_notes", "Gutschriften vorhanden", null],
+  ["document_integrity", "Dokument unverändert", "documentIntegrity"]
+];
+
+function renderEvidenceCard(asset, checks) {
+  const labelled = EVIDENCE_ITEMS.filter(([key]) => key in (checks || {}));
+  const list = labelled
+    .map(([key, label]) => `<div class="${checks[key] ? "check-ok" : "check-no"}">${checks[key] ? "✓" : "–"} ${esc(label)}</div>`)
+    .join("");
+  const attestable = ["UNVERIFIED", "VERIFIED"].includes(asset.status);
+  const fromErp = Boolean(asset.sales_invoice);
+  const form = attestable
+    ? `<form id="evidence-form" class="stack">
+        <p class="note">Haken Sie nur an, wofür ein Beleg im Dossier liegt. Ihre Bestätigung wird mit Ihrem Namen protokolliert.${
+          fromErp ? " Rechnung und offener Betrag kommen aus ERPNext." : ""
+        }</p>
+        <div class="checks">
+          ${EVIDENCE_ITEMS.filter(([, , field]) => field && !(fromErp && ["hasInvoice", "invoiceElectronic", "unpaid", "documentIntegrity"].includes(field)))
+            .map(
+              ([key, label, field]) =>
+                `<label class="check"><input type="checkbox" name="${field}" value="1" ${checks && checks[key] ? "checked" : ""} /> ${esc(label)}</label>`
+            )
+            .join("")}
+        </div>
+        <label class="check"><input type="checkbox" name="confirm" value="1" required /> Ich habe die Belege geprüft.</label>
+        <div class="actions"><button type="submit" class="btn ghost">Nachweise bestätigen</button></div>
+      </form>`
+    : "";
+  return `<section class="card">
+        <h2>Prüfnachweise</h2>
+        <div class="checks">${list}</div>
+        ${form}
+      </section>`;
+}
+
 function formatChf(value, currency = "CHF") {
   const n = Number(value);
   if (!Number.isFinite(n)) return "—";
@@ -945,6 +1009,11 @@ function renderReceivables() {
           <label class="check"><input type="checkbox" name="from_erpnext" value="1" /> Gebuchte Rechnung aus ERPNext</label>
           <p class="note">Mit ERPNext-Rechnung kommen Betrag, Währung, Fälligkeit und Kunde live aus ERPNext. Nur gebuchte, offene Rechnungen; vor Angebot, Verkauf und Kredit prüft Sponsum erneut.</p>
           <label>Nominal <input name="nominal_amount" inputmode="decimal" placeholder="0.00 (bei ERPNext-Rechnung leer lassen)" /></label>
+          <div class="grid-2">
+            <label>Ausstellungsdatum <input name="issue_date" inputmode="numeric" placeholder="TT.MM.JJJJ" pattern="\d{1,2}\.\d{1,2}\.\d{4}" autocomplete="off" /></label>
+            <label>Fälligkeitsdatum <input name="maturity_date" inputmode="numeric" placeholder="TT.MM.JJJJ" pattern="\d{1,2}\.\d{1,2}\.\d{4}" autocomplete="off" /></label>
+          </div>
+          <p class="note">Ohne ERPNext-Rechnung gelten Prüfnachweise (Vertrag, Lieferung, Anerkennung, KYC) erst, wenn Sie sie im Dossier mit Beleg bestätigen.</p>
           ${
             (workspace.lendingCustomers || []).length
               ? `<label>Gläubiger
@@ -978,8 +1047,7 @@ function renderReceivables() {
               invoice_id: invoice,
               sales_invoice: invoice,
               creditor_party_id: data.creditor_party_id || SELLER,
-              debtor_party_id: data.debtor_party_id,
-              evidence: { hasInvoice: true, unpaid: true, hasDispute: false, hasContract: true, invoiceElectronic: true }
+              debtor_party_id: data.debtor_party_id
             })
           }),
         `Forderung aus der ERPNext-Rechnung ${invoice} anlegen? Betrag, Währung und Fälligkeit kommen aus ERPNext.`
@@ -992,26 +1060,27 @@ function renderReceivables() {
       return;
     }
     data.nominal_amount = String(data.nominal_amount).replace(/'/g, "");
+    const issue = chDateToIso(data.issue_date);
+    const maturity = chDateToIso(data.maturity_date);
+    if (!issue || !maturity) {
+      lastError = "Bitte Ausstellungs- und Fälligkeitsdatum als TT.MM.JJJJ eingeben.";
+      route();
+      return;
+    }
+    if (maturity < issue) {
+      lastError = "Das Fälligkeitsdatum liegt vor dem Ausstellungsdatum.";
+      route();
+      return;
+    }
     act(
       () =>
       api("/receivables", {
         method: "POST",
         body: JSON.stringify({
           ...data,
-          issue_date: new Date().toISOString().slice(0, 10),
-          maturity_date: new Date(Date.now() + 67 * 86400000).toISOString().slice(0, 10),
-          creditor_party_id: data.creditor_party_id || SELLER,
-          evidence: {
-            hasInvoice: true,
-            unpaid: true,
-            hasDispute: false,
-            hasContract: true,
-            invoiceElectronic: true,
-            hasDelivery: true,
-            debtorAcknowledged: true,
-            creditorKyc: true,
-            debtorKyc: true
-          }
+          issue_date: issue,
+          maturity_date: maturity,
+          creditor_party_id: data.creditor_party_id || SELLER
         })
       }),
       String(data.creditor_party_id || "").startsWith("customer:")
@@ -1046,14 +1115,7 @@ async function renderDossier(id) {
       <div class="kpi"><strong>${labelOf(asset.instrument_type)}</strong><span>Instrument</span></div>
     </div>
     <div class="grid-2">
-      <section class="card">
-        <h2>Prüfnachweise</h2>
-        <div class="checks">
-          ${Object.entries(checks)
-            .map(([key, ok]) => `<div class="${ok ? "check-ok" : "check-no"}">${ok ? "✓" : "–"} ${key.replaceAll("_", " ")}</div>`)
-            .join("")}
-        </div>
-      </section>
+      ${renderEvidenceCard(asset, checks)}
       <section class="card">
         <h2>Beträge</h2>
         <p>Nominal ${formatChf(asset.nominal_amount, asset.currency)}<br>Akzeptiert ${formatChf(asset.accepted_amount, asset.currency)}<br>Bestritten ${formatChf(asset.disputed_amount, asset.currency)}<br>Offen ${formatChf(asset.outstanding_amount, asset.currency)}</p>
@@ -1166,6 +1228,18 @@ async function renderDossier(id) {
     </section>
   `;
 
+  const evidenceForm = document.getElementById("evidence-form");
+  if (evidenceForm) {
+    evidenceForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const form = new FormData(evidenceForm);
+      const evidence = {};
+      EVIDENCE_ITEMS.forEach(([, , field]) => {
+        if (field) evidence[field] = form.get(field) === "1";
+      });
+      act(() => api(`/receivables/${id}/verify`, { method: "POST", body: JSON.stringify(evidence) }));
+    });
+  }
   const liq = document.getElementById("act-liq");
   if (liq) liq.addEventListener("click", () => act(() => api(`/receivables/${id}/liquidity`, { method: "POST", body: JSON.stringify({ seller_party_id: SELLER }) }), "Liquiditätsanfrage starten? Die Forderung wird gesperrt."));
   const sell = document.getElementById("act-sell");
