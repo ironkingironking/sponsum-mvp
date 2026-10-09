@@ -17,6 +17,26 @@ export type DeadlineHint = {
   start: string | null;
   due: string | null;
   note: string;
+  /** Fristregeln, die in die Berechnung eingegangen sind (Stillstand, Betreibungsferien, Feiertage). */
+  rules: string[];
+};
+
+/**
+ * Berechnungsregime einer Frist:
+ * - zpo: Art. 142 ff. ZPO mit Stillstand nach Art. 145 Abs. 1 / Art. 146 ZPO
+ * - zpo-summary: summarisches oder Schlichtungsverfahren, kein Stillstand (Art. 145 Abs. 2 ZPO)
+ * - federal-admin: Art. 20–22a VwVG bzw. Art. 44–46 BGG, gleiche Stillstandsperioden
+ * - stpo: Art. 90 StPO, keine Gerichtsferien (Art. 89 Abs. 2 StPO)
+ * - schkg: Art. 31 SchKG mit Betreibungsferien (Art. 56 Ziff. 2, Art. 63 SchKG)
+ * - fiction: Zustellfiktion nach 7 Kalendertagen, ohne Verschiebung
+ */
+export type DeadlineRegime = "zpo" | "zpo-summary" | "federal-admin" | "stpo" | "schkg" | "fiction";
+
+export type LegalDeadline = {
+  due: string;
+  /** Tag, ab dem gezählt wird (Tag nach der wirksamen Zustellung). */
+  counting_from: string;
+  rules: string[];
 };
 
 export type JurisdictionAssessment = {
@@ -417,13 +437,157 @@ export function nextSwissBusinessDay(date: Date): Date {
   return next;
 }
 
-/** Frist beginnt am Tag nach der Zustellung; letzter Tag auf Sa/So/Feiertag verlängert sich. */
+/** Frist beginnt am Tag nach der Zustellung; letzter Tag auf Sa/So/Feiertag verlängert sich. Ohne Stillstand. */
 export function addSwissLegalDays(startIso: string, days: number): string {
   const match = startIso.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!match || days < 0) return "";
   const start = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + 1));
   start.setUTCDate(start.getUTCDate() + days - 1);
   return isoUtc(nextSwissBusinessDay(start));
+}
+
+function parseIsoUtc(iso: string): Date | null {
+  const match = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return date.getUTCMonth() === Number(match[2]) - 1 ? date : null;
+}
+
+function monthDay(date: Date): number {
+  return (date.getUTCMonth() + 1) * 100 + date.getUTCDate();
+}
+
+function inEasterWindow(date: Date): boolean {
+  const easter = easterSunday(date.getUTCFullYear());
+  const t = date.getTime();
+  return t >= shiftDays(easter, -7).getTime() && t <= shiftDays(easter, 7).getTime();
+}
+
+/**
+ * Stillstand der Fristen nach Art. 145 Abs. 1 ZPO (gleich Art. 22a VwVG, Art. 46 BGG):
+ * 7. Tag vor bis und mit 7. Tag nach Ostern, 15.07.–15.08., 18.12.–02.01.
+ */
+export function courtStandstill(date: Date): string | null {
+  if (inEasterWindow(date)) return "Ostern";
+  const md = monthDay(date);
+  if (md >= 715 && md <= 815) return "Sommer (15.07.–15.08.)";
+  if (md >= 1218 || md <= 102) return "Weihnachten/Neujahr (18.12.–02.01.)";
+  return null;
+}
+
+/** Betreibungsferien nach Art. 56 Ziff. 2 SchKG: je 7 Tage vor und nach Ostern und Weihnachten, 15.–31. Juli. */
+export function debtEnforcementHoliday(date: Date): string | null {
+  if (inEasterWindow(date)) return "Ostern";
+  const md = monthDay(date);
+  if (md >= 715 && md <= 731) return "Juli (15.–31.07.)";
+  if (md >= 1218 || md <= 101) return "Weihnachten (18.12.–01.01.)";
+  return null;
+}
+
+function isBusinessDay(date: Date): boolean {
+  const wd = date.getUTCDay();
+  return wd !== 0 && wd !== 6 && !isSwissFederalHoliday(date);
+}
+
+const RULE_WEEKEND = "Ende auf Samstag, Sonntag oder Feiertag: nächster Werktag";
+const RULE_NO_CANTONAL = "ohne kantonale Feiertage am Gerichtsort (bitte prüfen, Art. 142 Abs. 3 ZPO)";
+
+/**
+ * Fristende nach Schweizer Verfahrensrecht. `deliveryIso` ist der Tag der Zustellung;
+ * gezählt wird ab dem Folgetag. Liefert null bei ungültigem Datum.
+ */
+export function computeLegalDeadline(deliveryIso: string, days: number, regime: DeadlineRegime): LegalDeadline | null {
+  const delivery = parseIsoUtc(deliveryIso);
+  if (!delivery || !Number.isFinite(days) || days < 0) return null;
+  const rules: string[] = [];
+
+  if (regime === "fiction") {
+    const due = shiftDays(delivery, days);
+    return {
+      due: isoUtc(due),
+      counting_from: isoUtc(shiftDays(delivery, 1)),
+      rules: ["Zustellfiktion: Kalendertage, keine Verschiebung auf Werktage und kein Stillstand"]
+    };
+  }
+
+  if (regime === "zpo" || regime === "federal-admin") {
+    const basis = regime === "zpo" ? "Art. 145/146 ZPO" : "Art. 22a VwVG / Art. 46 BGG";
+    let day = shiftDays(delivery, 1);
+    let countingFrom: Date | null = null;
+    let counted = 0;
+    const skipped = new Set<string>();
+    for (let guard = 0; guard < 1000; guard += 1) {
+      const period = courtStandstill(day);
+      if (period) {
+        skipped.add(period);
+      } else {
+        if (!countingFrom) countingFrom = day;
+        counted += 1;
+        if (counted >= days) break;
+      }
+      day = shiftDays(day, 1);
+    }
+    if (days === 0) day = delivery;
+    let moved = false;
+    for (let guard = 0; guard < 60 && (!isBusinessDay(day) || courtStandstill(day)); guard += 1) {
+      if (courtStandstill(day)) skipped.add(courtStandstill(day) as string);
+      day = shiftDays(day, 1);
+      moved = true;
+    }
+    if (courtStandstill(delivery)) {
+      rules.push(`Zustellung im Stillstand ${courtStandstill(delivery)}: Fristbeginn am ersten Tag danach (${basis})`);
+    }
+    if (skipped.size) rules.push(`Stillstand ${[...skipped].join(", ")} nicht mitgezählt (${basis})`);
+    else rules.push(`Stillstand geprüft, nicht betroffen (${basis})`);
+    if (moved) rules.push(RULE_WEEKEND);
+    if (regime === "zpo") rules.push(RULE_NO_CANTONAL);
+    else rules.push("kantonale Verfahrensgesetze können andere Stillstände vorsehen");
+    return { due: isoUtc(day), counting_from: isoUtc(countingFrom || shiftDays(delivery, 1)), rules };
+  }
+
+  if (regime === "schkg") {
+    // Eine Betreibungshandlung in den Ferien wirkt erst am ersten Tag danach.
+    let effective = delivery;
+    if (debtEnforcementHoliday(delivery)) {
+      const period = debtEnforcementHoliday(delivery);
+      while (debtEnforcementHoliday(shiftDays(effective, 1))) effective = shiftDays(effective, 1);
+      effective = shiftDays(effective, 1);
+      rules.push(`Zustellung in den Betreibungsferien ${period}: wirksam am ersten Tag danach (Art. 56 SchKG)`);
+      // Der Wirkungstag zählt als Zustellung; gezählt wird ab dem Folgetag.
+    }
+    let day = shiftDays(effective, days);
+    if (!isBusinessDay(day)) {
+      while (!isBusinessDay(day)) day = shiftDays(day, 1);
+      rules.push("Ende auf Samstag, Sonntag oder Feiertag: nächster Werktag (Art. 31 Abs. 3 SchKG)");
+    }
+    const ferien = debtEnforcementHoliday(day);
+    if (ferien) {
+      while (debtEnforcementHoliday(day)) day = shiftDays(day, 1);
+      // `day` ist der erste Tag nach den Ferien; Fristende ist der dritte Werktag danach.
+      let business = 0;
+      day = shiftDays(day, -1);
+      while (business < 3) {
+        day = shiftDays(day, 1);
+        if (isBusinessDay(day)) business += 1;
+      }
+      rules.push(`Ende in den Betreibungsferien ${ferien}: verlängert bis zum 3. Werktag danach (Art. 63 SchKG)`);
+    } else {
+      rules.push("Betreibungsferien geprüft, Ende nicht betroffen (Art. 56/63 SchKG)");
+    }
+    rules.push("ohne kantonale Feiertage am Betreibungsort");
+    return { due: isoUtc(day), counting_from: isoUtc(shiftDays(effective, 1)), rules };
+  }
+
+  // stpo and zpo-summary: no court holidays
+  const due = addSwissLegalDays(isoUtc(delivery), days);
+  rules.push(
+    regime === "stpo"
+      ? "keine Gerichtsferien im Strafverfahren (Art. 89 Abs. 2 StPO)"
+      : "kein Stillstand im summarischen und im Schlichtungsverfahren (Art. 145 Abs. 2 ZPO)"
+  );
+  if (due !== isoUtc(shiftDays(delivery, days))) rules.push(RULE_WEEKEND);
+  rules.push(regime === "stpo" ? "ohne kantonale Feiertage" : RULE_NO_CANTONAL);
+  return { due, counting_from: isoUtc(shiftDays(delivery, 1)), rules };
 }
 
 function formatCh(iso: string | null): string {
@@ -438,9 +602,11 @@ function deadline(
   days: number,
   basis: string,
   start: string | null,
-  note: string
+  note: string,
+  regime: DeadlineRegime
 ): DeadlineHint {
-  const due = start ? addSwissLegalDays(start, days) : null;
+  const computed = start ? computeLegalDeadline(start, days, regime) : null;
+  const due = computed ? computed.due : null;
   return {
     id,
     title,
@@ -448,6 +614,7 @@ function deadline(
     basis,
     start,
     due,
+    rules: computed ? computed.rules : [],
     note: due ? `${note} Ablauf voraussichtlich ${formatCh(due)}.` : note
   };
 }
@@ -516,8 +683,7 @@ export function assessJurisdiction(
         20,
         "Art. 222 ZPO (gerichtliche Frist, oft 20 Tage)",
         start,
-        "Die genaue Frist setzt das Gericht; 20 Tage sind ein häufiger Ansatz, kein Automatismus."
-      )
+        "Die genaue Frist setzt das Gericht; 20 Tage sind ein häufiger Ansatz, kein Automatismus.", "zpo")
     );
     deadlines.push(
       deadline(
@@ -526,8 +692,7 @@ export function assessJurisdiction(
         30,
         "Art. 311 ZPO",
         start,
-        "Ab Zustellung des erstinstanzlichen Entscheids. Zulässigkeit nach Art. 308 ZPO prüfen."
-      )
+        "Ab Zustellung des erstinstanzlichen Entscheids. Zulässigkeit nach Art. 308 ZPO prüfen. Massgebend ist die Zustellung des begründeten Entscheids, nicht der Fristbeginn oben.", "zpo")
     );
     deadlines.push(
       deadline(
@@ -536,8 +701,7 @@ export function assessJurisdiction(
         30,
         "Art. 321 ZPO",
         start,
-        "Gegen erstinstanzliche Entscheide, soweit die Beschwerde zulässig ist."
-      )
+        "Gegen erstinstanzliche Entscheide, soweit die Beschwerde zulässig ist. Im summarischen Verfahren gilt kein Stillstand (Art. 145 Abs. 2 ZPO).", "zpo")
     );
   }
 
@@ -574,11 +738,10 @@ export function assessJurisdiction(
         10,
         "Art. 354 Abs. 1 StPO",
         start,
-        "Schriftlich bei der Staatsanwaltschaft. Zustellfiktion bei unangeforderter Sendung beachten."
-      )
+        "Schriftlich bei der Staatsanwaltschaft. Zustellfiktion bei unangeforderter Sendung beachten.", "stpo")
     );
     deadlines.push(
-      deadline("stpo-berufung", "Berufung", 10, "Art. 399 StPO", start, "Ab Eröffnung des erstinstanzlichen Urteils.")
+      deadline("stpo-berufung", "Berufung", 10, "Art. 399 StPO", start, "Ab Eröffnung des erstinstanzlichen Urteils.", "stpo")
     );
     deadlines.push(
       deadline(
@@ -587,8 +750,7 @@ export function assessJurisdiction(
         10,
         "Art. 396 StPO",
         start,
-        "Gegen verfahrensleitende Entscheide, soweit zulässig."
-      )
+        "Gegen verfahrensleitende Entscheide, soweit zulässig.", "stpo")
     );
   }
 
@@ -615,8 +777,7 @@ export function assessJurisdiction(
         30,
         "Art. 50 VwVG (Bund); viele VRPG analog 30 Tage",
         start,
-        "Kantonales Recht kann kürzer oder anders ansetzen — VRPG des zuständigen Kantons lesen."
-      )
+        "Kantonales Recht kann kürzer oder anders ansetzen — VRPG des zuständigen Kantons lesen.", "federal-admin")
     );
     deadlines.push(
       deadline(
@@ -625,8 +786,7 @@ export function assessJurisdiction(
         30,
         "Art. 100 BGG",
         start,
-        "Nur gegen letztinstanzliche Entscheide, soweit zulässig."
-      )
+        "Nur gegen letztinstanzliche Entscheide, soweit zulässig.", "federal-admin")
     );
   }
 
@@ -647,7 +807,7 @@ export function assessJurisdiction(
       detail: "Aberkennung bzw. Rechtsöffnung vor dem zuständigen Gericht am Betreibungsort."
     });
     deadlines.push(
-      deadline("schkg-rv", "Rechtsvorschlag", 10, "Art. 74 SchKG", start, "Ab Zustellung des Zahlungsbefehls.")
+      deadline("schkg-rv", "Rechtsvorschlag", 10, "Art. 74 SchKG", start, "Ab Zustellung des Zahlungsbefehls.", "schkg")
     );
     deadlines.push(
       deadline(
@@ -656,8 +816,7 @@ export function assessJurisdiction(
         20,
         "Art. 83 / 85a SchKG",
         start,
-        "Fristen je nach Pfad; Gericht setzt teilweise selbst."
-      )
+        "Fristen je nach Pfad; Gericht setzt teilweise selbst.", "schkg")
     );
   }
 
@@ -668,10 +827,18 @@ export function assessJurisdiction(
       7,
       "Justitia.swiss (7-Tage-Fiktion bei DELIVERY)",
       start,
-      "Abruf einer Zustellung bleibt in der Suite bewusst und nicht automatisch RECEIVED."
-    )
+      "Abruf einer Zustellung bleibt in der Suite bewusst und nicht automatisch RECEIVED.", "fiction")
   );
-  const calcBasis = family === "stpo" ? "Art. 90 StPO" : family === "admin" ? "Art. 20–22 VwVG" : "Art. 142 ZPO";
+  const calcBasis =
+    family === "stpo" ? "Art. 90 StPO" : family === "admin" ? "Art. 20–22 VwVG" : family === "schkg" ? "Art. 31 SchKG" : "Art. 142 ZPO";
+  const standstillBasis =
+    family === "stpo"
+      ? "Im Strafverfahren gibt es keine Gerichtsferien (Art. 89 Abs. 2 StPO)."
+      : family === "schkg"
+        ? "Betreibungsferien (Art. 56 Ziff. 2 SchKG: Ostern und Weihnachten je ±7 Tage, 15.–31. Juli) verlängern ein Fristende darin bis zum 3. Werktag danach (Art. 63 SchKG)."
+        : family === "admin"
+          ? "Stillstand nach Art. 22a VwVG / Art. 46 BGG (Ostern ±7 Tage, 15.07.–15.08., 18.12.–02.01.) ist eingerechnet."
+          : "Stillstand nach Art. 145 ZPO (Ostern ±7 Tage, 15.07.–15.08., 18.12.–02.01.) ist eingerechnet, ausser im summarischen und im Schlichtungsverfahren.";
 
   if (holderCanton.canton && holderCanton.canton !== canton) {
     venues.push({
@@ -693,6 +860,6 @@ export function assessJurisdiction(
     authorities,
     deadlines,
     disclaimer:
-      `Hinweis aus Standardregeln von ZPO, StPO, VwVG/BGG und SchKG. Kein Rechtsrat. ${calcBasis}: Frist beginnt am Tag nach der Zustellung; letzter Tag auf Sa/So oder eidg. Feiertag verschiebt sich auf den nächsten Werktag. Kantonale VRPG, Gerichtsstandsvereinbarungen und Justitia-Fiktion können abweichen.`
+      `Hinweis aus Standardregeln von ZPO, StPO, VwVG/BGG und SchKG. Kein Rechtsrat. ${calcBasis}: Frist beginnt am Tag nach der Zustellung; letzter Tag auf Sa/So oder Feiertag verschiebt sich auf den nächsten Werktag. ${standstillBasis} Berücksichtigt sind nur landesweite Feiertage, keine kantonalen Feiertage am Gerichtsort. Kantonale VRPG und Gerichtsstandsvereinbarungen können abweichen.`
   };
 }

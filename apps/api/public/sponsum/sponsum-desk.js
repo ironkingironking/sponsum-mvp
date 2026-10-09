@@ -503,7 +503,11 @@ function renderVenueCard(venue, bench) {
         ${(venue.deadlines || [])
           .map(
             (row) =>
-              `<tr><td>${esc(row.title)}</td><td>${row.days}</td><td>${esc(row.basis)}</td><td>${esc(due(row))}</td></tr>`
+              `<tr><td>${esc(row.title)}${
+                row.rules && row.rules.length
+                  ? `<br><span class="muted">${row.rules.map((rule) => esc(rule)).join(" · ")}</span>`
+                  : ""
+              }</td><td>${row.days}</td><td>${esc(row.basis)}</td><td>${esc(due(row))}</td></tr>`
           )
           .join("")}
       </tbody>
