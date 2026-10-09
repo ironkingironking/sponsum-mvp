@@ -310,7 +310,8 @@ export function partyLines(role: string, party?: PartyCard): string[] {
   if (!party || !party.name) return [`${role}: nicht aktenkundig`];
   const lines = [`${role}: ${party.name}`];
   if (party.address) lines.push(party.address);
-  const cityLine = [party.city, party.country].filter(Boolean).join(", ");
+  const cityInAddress = Boolean(party.address && party.city && party.address.includes(party.city));
+  const cityLine = [cityInAddress ? null : party.city, party.country].filter(Boolean).join(", ");
   if (cityLine) lines.push(cityLine);
   if (party.iban) lines.push(`IBAN ${party.iban}`);
   if (party.tax_id) lines.push(`UID/MWST ${party.tax_id}`);
@@ -384,7 +385,7 @@ export function renderFormLines(
   now = new Date().toISOString()
 ): string[] {
   const date = formatSwissDate(now);
-  const place = ctx.holder?.city || ctx.origin_creditor?.city || "Zürich";
+  const place = ctx.holder?.city || ctx.origin_creditor?.city || "";
   const holderName = ctx.holder?.name || ctx.current_holder_party_id;
   const debtorName = ctx.debtor?.name || ctx.debtor_party_id;
   const accepted = formatMoney(ctx.currency, ctx.accepted_amount);
@@ -394,7 +395,7 @@ export function renderFormLines(
   const header = [
     ...partyLines("Absender / Inhaber", ctx.holder),
     "",
-    `${place}, ${date}`,
+    place ? `${place}, ${date}` : date,
     "",
     ...partyLines("Empfänger", ctx.debtor),
     "",

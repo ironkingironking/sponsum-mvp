@@ -3254,14 +3254,17 @@ function partyCardsForVenue(state: ReturnType<MemorySponsumStore["snapshot"]>): 
   return [...local.companies, ...local.customers];
 }
 
-const DEMO_PARTY_GEO: Record<string, Pick<PartyRow, "name" | "city" | "country" | "kind">> = {
+const MOVENA_SEAT = { address: "Fassbindstrasse 6, 4310 Rheinfelden", city: "Rheinfelden", country: "Schweiz" };
+
+const DEMO_PARTY_GEO: Record<string, Pick<PartyRow, "name" | "city" | "country" | "kind" | "address">> = {
   "debtor-nord": { name: "Nordholz AG", city: "Winterthur", country: "Schweiz", kind: "customer" },
   "debtor-helvetia": { name: "Helvetia Industrie AG", city: "Zürich", country: "Schweiz", kind: "customer" },
   "debtor-alpine": { name: "Alpine Components AG", city: "Chur", country: "Schweiz", kind: "customer" },
   "debtor-industria": { name: "Industria AG", city: "Baden", country: "Schweiz", kind: "customer" },
   "debtor-abc": { name: "ABC Werkstoffe AG", city: "Aarau", country: "Schweiz", kind: "customer" },
-  "seller-ui": { name: "Movena GmbH", city: "Zürich", country: "Schweiz", kind: "company" },
-  "seller-1": { name: "Movena GmbH", city: "Zürich", country: "Schweiz", kind: "company" }
+  // Sitz laut Handelsregister (SPO-06): nicht Zürich.
+  "seller-ui": { name: "Movena GmbH", ...MOVENA_SEAT, kind: "company" },
+  "seller-1": { name: "Movena GmbH", ...MOVENA_SEAT, kind: "company" }
 };
 
 function localPartiesFromState(state: ReturnType<MemorySponsumStore["snapshot"]>): {
@@ -3278,7 +3281,8 @@ function localPartiesFromState(state: ReturnType<MemorySponsumStore["snapshot"]>
       name: demo?.name || id.replace(/^(customer:|company:)/, ""),
       kind: demo?.kind || fallbackKind,
       city: demo?.city ?? null,
-      country: demo?.country ?? null
+      country: demo?.country ?? null,
+      address: demo?.address ?? null
     });
   };
   for (const asset of state.assets) {

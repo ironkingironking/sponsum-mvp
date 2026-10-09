@@ -214,3 +214,41 @@ test("venue and deadlines are available without drafting a letter", async () => 
   assert.equal(tracked.workbench.procedure_family, "admin");
   assert.ok(tracked.venue.deadlines.some((row) => /VwVG/.test(row.basis)));
 });
+
+test("letters use the holder's seat, never a fixed Zürich (SPO-06)", () => {
+  const base = {
+    receivable_id: "SPN-1",
+    invoice_id: "INV-1",
+    status: "PARTIALLY_DISPUTED",
+    currency: "CHF",
+    nominal_amount: "50000",
+    accepted_amount: "40000",
+    disputed_amount: "10000",
+    debtor_party_id: "debtor-1",
+    origin_creditor_party_id: "seller-1",
+    current_holder_party_id: "seller-1",
+    resolve_case_id: "resolve-1",
+    debtor: { id: "debtor-1", name: "Nordholz AG", kind: "customer", city: "Winterthur" }
+  };
+  const lines = renderFormLines(
+    "mahnung",
+    {
+      ...base,
+      holder: {
+        id: "seller-1",
+        name: "Movena GmbH",
+        kind: "company",
+        address: "Fassbindstrasse 6, 4310 Rheinfelden",
+        city: "Rheinfelden",
+        country: "Schweiz"
+      }
+    },
+    "2026-08-17T10:00:00.000Z"
+  );
+  assert.ok(lines.includes("Rheinfelden, 17.08.2026"));
+  assert.ok(lines.includes("Fassbindstrasse 6, 4310 Rheinfelden"));
+  assert.ok(!lines.some((line) => /Zürich/.test(line)));
+  const unknownSeat = renderFormLines("mahnung", { ...base, holder: { id: "x", name: "Movena GmbH", kind: "company" } }, "2026-08-17T10:00:00.000Z");
+  assert.ok(unknownSeat.includes("17.08.2026"));
+  assert.ok(!unknownSeat.some((line) => /Zürich/.test(line)));
+});

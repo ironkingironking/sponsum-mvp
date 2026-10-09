@@ -115,6 +115,7 @@ const CITY_CANTON: Record<string, string> = {
   baden: "AG",
   wettingen: "AG",
   brugg: "AG",
+  rheinfelden: "AG",
   basel: "BS",
   liestal: "BL",
   allschwil: "BL",
