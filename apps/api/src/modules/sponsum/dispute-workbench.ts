@@ -409,7 +409,7 @@ export function renderFormLines(
     `Aus der Aktenlage ergibt sich die Forderung ${ctx.receivable_id} aus Rechnung ${ctx.invoice_id}.`,
     `Nominal ${nominal}, akzeptiert ${accepted}, bestritten ${disputed}.`,
     `Fälligkeit ${due}. Status ${ctx.status}.`,
-    `Gläubigerin/Inhaberin ist ${holderName}; der frühere Origin-Gläubiger ${ctx.origin_creditor?.name || ctx.origin_creditor_party_id} ist nur nachrangig genannt.`,
+    `Gläubigerin/Inhaberin ist ${holderName}; die frühere ursprüngliche Gläubigerin ${ctx.origin_creditor?.name || ctx.origin_creditor_party_id} ist nur nachrangig genannt.`,
     ctx.resolve_case_id ? `Resolve-Fall ${ctx.resolve_case_id}.` : "",
     ctx.eschkg_case_id ? `eSchKG ${ctx.eschkg_case_id}.` : "",
     ctx.venue
