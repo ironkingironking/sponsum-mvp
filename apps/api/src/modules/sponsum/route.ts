@@ -7,6 +7,20 @@ import { settlementWebhookSecret, verifySettlementReport } from "./settlement-we
 export const sponsumRouter = Router();
 sponsumRouter.use(requireSponsumScope());
 sponsumRouter.get("/session", (_req, res) => res.json({ ...principal(), policy: "owner_or_shared_with_tenant_admin" }));
+
+/**
+ * SPO-05: the desk acts for the tenant's own company. A request may name it (or leave it out),
+ * never another seller; the person stands in every event (appendEvent).
+ */
+const OWN_SELLER_PARTIES = new Set(["seller-ui", "seller-1"]);
+sponsumRouter.use((req, res, next) => {
+  if (req.method !== "POST" || !req.body || typeof req.body !== "object") return next();
+  const supplied = (req.body as Record<string, unknown>).seller_party_id;
+  if (supplied !== undefined && supplied !== null && supplied !== "" && !OWN_SELLER_PARTIES.has(String(supplied))) {
+    return res.status(403).json({ error: { code: "forbidden", message: "Verkäufer ist immer die eigene Gesellschaft dieses Mandanten." } });
+  }
+  next();
+});
 sponsumRouter.post("/access/:kind/:id", (req, res) => {
   handle(() => sponsumService.shareReadAccess(req.params.kind, req.params.id, req.body?.readers), res);
 });
@@ -334,6 +348,10 @@ sponsumRouter.get("/receivables/:id/dossier", (req, res) => {
 });
 
 sponsumRouter.post("/receivables/:id/verify", (req, res) => {
+  // Prüfnachweise bestätigen gibt die Forderung für Angebot und Finanzierung frei: nur Mandantenadministration.
+  if (!principal()?.admin) {
+    return res.status(403).json({ error: { code: "forbidden", message: "Prüfnachweise bestätigen darf nur die Mandantenadministration." } });
+  }
   handle(() => sponsumService.verify(req.params.id, req.body ?? {}), res);
 });
 

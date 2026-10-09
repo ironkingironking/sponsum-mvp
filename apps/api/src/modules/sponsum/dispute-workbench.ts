@@ -36,6 +36,7 @@ export type DisputeFormRecord = {
   template_id: DisputeFormTemplateId;
   title: string;
   created_at: string;
+  created_by?: string | null;
   lines: string[];
   source: "template" | "openai";
 };
@@ -514,7 +515,7 @@ export function briefingManifest(input: {
     eschkg_case_id: input.workbench.eschkg_case_id,
     procedure_family: input.workbench.procedure_family,
     deadline_start: input.workbench.deadline_start,
-    forms: input.workbench.forms.map((row) => ({ id: row.id, template_id: row.template_id, title: row.title }))
+    forms: input.workbench.forms.map((row) => ({ id: row.id, template_id: row.template_id, title: row.title, created_at: row.created_at }))
   };
 }
 

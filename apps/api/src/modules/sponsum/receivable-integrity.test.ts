@@ -6,6 +6,10 @@ import type { LendingConfig } from "./lending-bridge.js";
 import { createLendingMock } from "./lending-mock.js";
 import { MemorySponsumStore } from "./store.js";
 import { SponsumService } from "./service.js";
+import { setSponsumToday } from "./clock.js";
+
+// Fixtures use maturity dates in autumn 2026; pin «today» so they are not overdue (SPO-03).
+setSponsumToday(() => "2026-09-01");
 
 // DK-31 (audit 2026-10-08): a receivable is sold or financed at most once.
 

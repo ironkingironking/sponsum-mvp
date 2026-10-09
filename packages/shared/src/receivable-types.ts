@@ -20,6 +20,8 @@ export type ReceivableStatus = (typeof RECEIVABLE_STATUSES)[number];
 export const INSTRUMENT_TYPES = [
   "ORDINARY_RECEIVABLE",
   "ASSIGNED_RECEIVABLE",
+  // SPO-04: bought (paid and transferred) without a written assignment contract (OR 165 Abs. 1).
+  "PURCHASED_RECEIVABLE",
   "REGISTER_RIGHT",
   "ELECTRONIC_TRADE_INSTRUMENT",
   "BITCREDIT_EBILL",

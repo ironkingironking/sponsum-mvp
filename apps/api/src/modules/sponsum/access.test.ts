@@ -4,6 +4,10 @@ import { inScope, resolvePrincipal, type Principal, type AccessConfig } from "./
 import { secureStore, scopedState } from "./scoped-store.js";
 import { MemorySponsumStore, emptyState } from "./store.js";
 import { SponsumService } from "./service.js";
+import { setSponsumToday } from "./clock.js";
+
+// Fixtures use maturity dates in autumn 2026; pin «today» so they are not overdue (SPO-03).
+setSponsumToday(() => "2026-09-01");
 
 const alice: Principal = { tenantId: "tenant-a", userId: "alice", email: "alice@example.test", admin: false, legacyTenant: "tenant-a" };
 const bob = { ...alice, userId: "bob", email: "bob@example.test" };
@@ -32,8 +36,8 @@ test("own records, related counts, parties and downloads cannot cross users or t
   inScope(alice, () => {
     assert.deepEqual(service.listReceivables().map(r => r.receivable_id), [a.receivable_id]);
     assert.equal(service.workspace().kpis.receivables, 1);
-    assert.throws(() => service.dossier(b.receivable_id), /not found/i);
-    assert.throws(() => service.dossier(c.receivable_id), /not found/i);
+    assert.throws(() => service.dossier(b.receivable_id), /not found|nicht gefunden/i);
+    assert.throws(() => service.dossier(c.receivable_id), /not found|nicht gefunden/i);
     assert.throws(() => service.verify(b.receivable_id, {}));
     assert.equal(service.events().length, 2);
   });

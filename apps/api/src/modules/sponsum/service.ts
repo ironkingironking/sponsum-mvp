@@ -1,4 +1,5 @@
 import { principal } from "./access-context.js";
+import { overdueDays, withSponsumToday } from "./clock.js";
 import { existsGlobally, idsGlobally, secureStore, setRecordReaders } from "./scoped-store.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { execFileSync } from "node:child_process";
@@ -155,6 +156,10 @@ const EVENT_SECRET = "sponsum-node-event-secret";
  * `new:<invoice>` while a receivable is created). Steps that sell or finance a receivable refuse to run without it.
  */
 const verifiedInvoices = new AsyncLocalStorage<Map<string, OpenSalesInvoice>>();
+
+function overdueMessage(days: number): string {
+  return `Die Forderung ist seit ${days} Tag${days === 1 ? "" : "en"} überfällig. Überfällige Forderungen werden weder angeboten noch verkauft; zuerst Mahnung oder Movena Resolve.`;
+}
 
 export class SponsumService {
   constructor(private readonly store = new MemorySponsumStore()) { this.store = secureStore(store); }
@@ -436,7 +441,7 @@ export class SponsumService {
 
   getReceivable(id: string): ReceivableAsset {
     const asset = this.store.snapshot().assets.find((row) => row.receivable_id === id);
-    if (!asset) throw new DomainError("not_found", "Receivable not found");
+    if (!asset) throw new DomainError("not_found", "Forderung nicht gefunden.");
     return asset;
   }
 
@@ -658,6 +663,8 @@ export class SponsumService {
     const state = this.store.snapshot();
     this.assertKyc(state, input.seller_party_id);
     const asset = mustAsset(state, receivableId);
+    const late = overdueDays(asset);
+    if (late > 0) throw new DomainError("overdue_blocks_offer", overdueMessage(late));
     if (input.seller_party_id !== asset.current_holder_party_id) {
       throw new DomainError("forbidden", "Only the current holder can offer the receivable");
     }
@@ -754,6 +761,8 @@ export class SponsumService {
     this.assertKyc(state, buyerPartyId);
     const offer = state.offers.find((row) => row.offer_id === offerId);
     if (!offer || offer.status !== "LIVE") throw new DomainError("offer_not_live", "Offer is not live");
+    const lateBid = overdueDays(mustAsset(state, offer.receivable_id));
+    if (lateBid > 0) throw new DomainError("overdue_blocks_offer", overdueMessage(lateBid));
     if (offer.min_price && Number(amount) < Number(offer.min_price)) {
       throw new DomainError("bid_too_low", "Bid is below minimum price");
     }
@@ -796,8 +805,10 @@ export class SponsumService {
     }
     const offer = state.offers.find((row) => row.offer_id === bid.offer_id);
     if (!offer || offer.status !== "LIVE") throw new DomainError("offer_not_live", "Offer is not live");
-    if (offer.seller_party_id !== sellerPartyId) throw new DomainError("forbidden", "Only seller can accept");
+    if (offer.seller_party_id !== sellerPartyId) throw new DomainError("forbidden", "Nur die verkaufende Partei kann ein Gebot annehmen.");
     const asset = mustAsset(state, offer.receivable_id);
+    const lateAccept = overdueDays(asset);
+    if (lateAccept > 0) throw new DomainError("overdue_blocks_offer", overdueMessage(lateAccept));
     this.assertNotFinanced(asset);
     this.checkedInvoice(asset);
     const lock = mustLock(state, asset.receivable_id);
@@ -989,7 +1000,10 @@ export class SponsumService {
     assertTransition(RECEIVABLE_TRANSITIONS, asset.status, "TRANSFERRED", "receivable");
     asset.status = "TRANSFERRED";
     asset.current_holder_party_id = trade.buyer_party_id;
-    asset.instrument_type = "ASSIGNED_RECEIVABLE";
+    // SPO-04: only a written assignment contract (OR 165 Abs. 1) makes it an assigned receivable.
+    asset.instrument_type = state.assignments.some((row) => row.trade_id === trade.trade_id)
+      ? "ASSIGNED_RECEIVABLE"
+      : "PURCHASED_RECEIVABLE";
     const lock = mustLock(state, asset.receivable_id);
     lock.state = "ASSIGNED";
     lock.version += 1;
@@ -1091,7 +1105,8 @@ export class SponsumService {
           risk_class: asset.risk_class,
           verification_score: asset.verification_score,
           min_price: offer.min_price,
-          dispute: Number(asset.disputed_amount) > 0 ? "yes" : "none"
+          dispute: Number(asset.disputed_amount) > 0 ? "yes" : "none",
+          overdue_days: overdueDays(asset)
         };
       });
   }
@@ -1414,6 +1429,7 @@ export class SponsumService {
       template_id: templateId as DisputeFormTemplateId,
       title: template.title,
       created_at: new Date().toISOString(),
+      created_by: principal()?.email || null,
       lines,
       source
     };
@@ -1488,7 +1504,7 @@ export class SponsumService {
       `Empfänger ${record.recipient}`,
       `Forderung ${ctx.receivable_id}`,
       `Rechnung ${ctx.invoice_id}`,
-      `Inhaber ${ctx.current_holder_party_id} (Holder gewinnt gegen Origin-Glaubiger)`,
+      `Gläubigerin (aktuelle Inhaberin) ${partyDisplayName(ctx.current_holder_party_id)}`,
       `Resolve ${ctx.resolve_case_id || "—"}`,
       `Aussergerichtlich ${workbench.ooc_stage}`,
       `Staatlich ${workbench.court_stage}`,
@@ -1694,6 +1710,8 @@ export class SponsumService {
     const offerIds = new Set(offers.map((row) => row.offer_id));
     return {
       asset,
+      overdue_days: overdueDays(asset),
+      assignment_contract: state.assignments.some((row) => row.receivable_id === receivableId),
       lock: mustLock(state, receivableId),
       verification: [...state.verifications].reverse().find((row) => row.receivable_id === receivableId) ?? null,
       registry: state.registry.filter((row) => row.receivable_id === receivableId),
@@ -2765,6 +2783,11 @@ export class SponsumService {
 
   seedDemoIfEmpty(): { seeded: boolean } {
     if (this.store.snapshot().assets.length > 0) return { seeded: false };
+    // The demo book is a story as of mid-August 2026; the overdue rule (SPO-03) judges it on that day.
+    return withSponsumToday("2026-08-15", () => this.seedDemoBook());
+  }
+
+  private seedDemoBook(): { seeded: boolean } {
     this.setKyc("buyer-1", "PASSED");
     this.setKyc("seller-ui", "PASSED");
     this.upsertBuyerProfile({
@@ -3104,10 +3127,12 @@ export class SponsumService {
     }
   ) {
     const prev = state.events.length ? state.events[state.events.length - 1].event_hash : null;
+    const who = principal();
     const event = makeProtocolEvent({
       event_id: `evt-${randomUUID()}`,
       event_type: input.type,
-      payload: input.payload,
+      // SPO-05: the signed-in person stands in every event, next to the acting party.
+      payload: who && !("by" in input.payload) ? { ...input.payload, by: who.email || who.userId } : input.payload,
       prev_event_hash: prev,
       receivable_id: input.receivable_id,
       offer_id: input.offer_id,
@@ -3267,6 +3292,12 @@ const DEMO_PARTY_GEO: Record<string, Pick<PartyRow, "name" | "city" | "country" 
   "seller-1": { name: "Movena GmbH", ...MOVENA_SEAT, kind: "company" }
 };
 
+/** Display name of a party id for documents (SPO-05/D-06): never the technical id when a name is known. */
+function partyDisplayName(id: string | null | undefined): string {
+  if (!id) return "—";
+  return DEMO_PARTY_GEO[id]?.name || String(id).replace(/^(company|customer):/, "");
+}
+
 function localPartiesFromState(state: ReturnType<MemorySponsumStore["snapshot"]>): {
   companies: PartyRow[];
   customers: PartyRow[];
@@ -3416,7 +3447,7 @@ const FACTOR_NODES: FactorNode[] = [
 
 function mustAsset(state: ReturnType<MemorySponsumStore["snapshot"]>, id: string): ReceivableAsset {
   const asset = state.assets.find((row) => row.receivable_id === id);
-  if (!asset) throw new DomainError("not_found", "Receivable not found");
+  if (!asset) throw new DomainError("not_found", "Forderung nicht gefunden.");
   return asset;
 }
 

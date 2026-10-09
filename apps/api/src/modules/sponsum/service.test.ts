@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DomainError, getPolicy } from "@sponsum/shared";
 import { SponsumService } from "./service.js";
+import { setSponsumToday } from "./clock.js";
+
+// Fixtures use maturity dates in autumn 2026; pin «today» so they are not overdue (SPO-03).
+setSponsumToday(() => "2026-09-01");
 
 function seed(service: SponsumService) {
   service.setKyc("buyer-1", "PASSED");
