@@ -131,6 +131,80 @@ function chDateToIso(value) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+/** Heutiges Datum als YYYY-MM-DD in Ortszeit (toISOString() rechnet in UTC und liegt nachts einen Tag daneben). */
+function localIsoDate(offsetDays = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Dialog in der Seite statt der Browserdialoge (SPO-07). Ohne `input` liefert er true/false,
+ * mit `input` den bestätigten Text oder null. Esc und «Abbrechen» brechen ab; `validate` meldet Fehler am Feld.
+ */
+function appDialog({ title = "Bitte bestätigen", text = "", input = null, confirmLabel = "Bestätigen", danger = false } = {}) {
+  return new Promise((resolve) => {
+    const dlg = document.createElement("dialog");
+    dlg.className = "app-dialog";
+    dlg.setAttribute("aria-labelledby", "app-dialog-title");
+    const field = input
+      ? `<label>${esc(input.label)}<input name="value" autocomplete="off" ${input.inputmode ? `inputmode="${esc(input.inputmode)}"` : ""} ${
+          input.placeholder ? `placeholder="${esc(input.placeholder)}"` : ""
+        } value="${esc(input.value || "")}" /></label><p class="error" data-dialog-error role="alert" hidden></p>`
+      : "";
+    dlg.innerHTML = `<form method="dialog" class="stack">
+        <h2 id="app-dialog-title">${esc(title)}</h2>
+        ${text ? `<p>${esc(text).replace(/\n/g, "<br>")}</p>` : ""}
+        ${field}
+        <div class="actions">
+          <button type="button" class="btn ghost" data-dialog-cancel>Abbrechen</button>
+          <button type="submit" class="btn${danger ? " danger" : ""}">${esc(confirmLabel)}</button>
+        </div>
+      </form>`;
+    document.body.appendChild(dlg);
+    const value = dlg.querySelector("input[name=value]");
+    const error = dlg.querySelector("[data-dialog-error]");
+    let result = input ? null : false;
+    dlg.querySelector("[data-dialog-cancel]").addEventListener("click", () => dlg.close());
+    dlg.querySelector("form").addEventListener("submit", (event) => {
+      if (!input) {
+        result = true;
+        return;
+      }
+      const typed = value.value.trim();
+      const problem = input.validate ? input.validate(typed) : "";
+      if (problem) {
+        event.preventDefault();
+        error.textContent = problem;
+        error.hidden = false;
+        value.setAttribute("aria-invalid", "true");
+        value.focus();
+        return;
+      }
+      result = typed;
+    });
+    dlg.addEventListener("close", () => {
+      dlg.remove();
+      resolve(result);
+    });
+    dlg.showModal();
+    (value || dlg.querySelector("button[type=submit]")).focus();
+  });
+}
+
+/** Kurzer Hinweis oben im Inhalt, ohne Browserdialog. */
+function showNotice(message) {
+  let note = document.querySelector("[data-desk-notice]");
+  if (!note) {
+    note = document.createElement("p");
+    note.className = "error";
+    note.setAttribute("role", "alert");
+    note.setAttribute("data-desk-notice", "");
+    main.prepend(note);
+  }
+  note.textContent = message;
+}
+
 /** Prüfnachweise: Schlüssel der Prüfung → deutsche Bezeichnung und Feld im Bestätigen-Formular. */
 const EVIDENCE_ITEMS = [
   ["contract", "Vertrag", "hasContract"],
@@ -544,7 +618,7 @@ function renderVenueCard(venue, bench) {
           </select>
         </label>
         <label>Fristbeginn (Zustellung)
-          <input type="date" name="from" id="venue-from" value="${esc(startValue)}" />
+          <input name="from" id="venue-from" inputmode="numeric" placeholder="TT.MM.JJJJ" autocomplete="off" value="${esc(startValue ? formatDate(startValue) : "")}" />
         </label>
       </div>
       <div class="actions"><button class="btn ghost" id="venue-btn" type="button">Neu ermitteln</button></div>
@@ -697,7 +771,14 @@ function bindVenueCard(receivableId, bench) {
 
   async function assess(persist) {
     const family = familyEl?.value || "";
-    const from = fromEl?.value || "";
+    const typedFrom = (fromEl?.value || "").trim();
+    const from = typedFrom ? chDateToIso(typedFrom) : "";
+    if (typedFrom && !from) {
+      if (status) status.textContent = "Fristbeginn bitte als TT.MM.JJJJ eingeben.";
+      fromEl?.setAttribute("aria-invalid", "true");
+      return;
+    }
+    fromEl?.removeAttribute("aria-invalid");
     if (status) status.textContent = persist ? "Speichere und ermittle…" : "Ermittle Gerichtsstand und Fristen…";
     try {
       if (persist) {
@@ -872,21 +953,23 @@ async function toggleSettlementRow(row, forceOpen) {
  * DK-31: a payment is confirmed manually only from the bank statement, by a second person (not who accepted the bid),
  * with the bank's booking reference. The server takes amount and currency from the instruction.
  */
-function confirmSettlementManually(instructionId, confirmText) {
+async function confirmSettlementManually(instructionId, confirmText) {
   if (busy) return act(() => Promise.resolve());
-  const reference = window.prompt(
-    `${confirmText}\n\nBuchungsreferenz des Zahlungseingangs aus dem Bankauszug (camt.054 oder E-Banking). Eine zweite Person bestätigt, nicht wer das Gebot angenommen hat.`
-  );
+  const reference = await appDialog({
+    title: "Zahlungseingang bestätigen",
+    text: `${confirmText}\nEine zweite Person bestätigt, nicht wer das Gebot angenommen hat.`,
+    input: {
+      label: "Buchungsreferenz aus dem Bankauszug (camt.054 oder E-Banking)",
+      validate: (value) => (value.length < 4 ? "Bitte die Buchungsreferenz des Zahlungseingangs angeben." : "")
+    },
+    confirmLabel: "Zahlungseingang übernehmen",
+    danger: true
+  });
   if (reference === null) return;
-  if (reference.trim().length < 4) {
-    lastError = "Bitte die Buchungsreferenz des Zahlungseingangs aus dem Bankauszug angeben.";
-    route();
-    return;
-  }
   act(() =>
     api(`/settlements/${encodeURIComponent(instructionId)}/provider-confirm`, {
       method: "POST",
-      body: JSON.stringify({ confirm: true, bank_reference: reference.trim() })
+      body: JSON.stringify({ confirm: true, bank_reference: reference })
     })
   );
 }
@@ -894,12 +977,10 @@ function confirmSettlementManually(instructionId, confirmText) {
 async function act(run, confirmText) {
   if (busy) {
     lastError = "Bitte warten — eine Aktion läuft noch.";
-    const alert = document.querySelector("[role='alert'], .error");
-    if (alert) alert.textContent = lastError;
-    else window.alert(lastError);
+    showNotice(lastError);
     return;
   }
-  if (confirmText && !window.confirm(confirmText)) return;
+  if (confirmText && !(await appDialog({ text: confirmText }))) return;
   busy = true;
   lastError = "";
   try {
@@ -1246,17 +1327,33 @@ async function renderDossier(id) {
   if (sell) sell.addEventListener("click", () => act(() => api(`/receivables/${id}/offers`, { method: "POST", body: JSON.stringify({ seller_party_id: SELLER, min_price: String(Number(asset.nominal_amount) * 0.97) }) }), "Forderung am Markt anbieten? Sie kann nicht parallel erneut angeboten werden."));
   const dispute = document.getElementById("act-dispute");
   if (dispute) {
-    dispute.addEventListener("click", () => {
-      const suggested = Number(asset.disputed_amount) > 0 ? asset.disputed_amount : "";
-      const typed = window.prompt("Bestrittener Betrag in CHF", suggested || String(Math.round(Number(asset.nominal_amount) * 0.2) || "10000"));
-      if (typed == null || !String(typed).trim()) return;
+    dispute.addEventListener("click", async () => {
+      const nominal = Number(asset.nominal_amount) || 0;
+      const typed = await appDialog({
+        title: "Streitfall eröffnen",
+        text: "Ein unbelasteter Verkauf ist danach nicht möglich.",
+        input: {
+          label: `Bestrittener Betrag in ${asset.currency || "CHF"} (höchstens ${formatChf(nominal, asset.currency)})`,
+          inputmode: "decimal",
+          placeholder: "0.00",
+          value: Number(asset.disputed_amount) > 0 ? asset.disputed_amount : "",
+          validate: (value) => {
+            const amount = Number(String(value).replace(/'/g, ""));
+            if (!value || !Number.isFinite(amount) || amount <= 0) return "Bitte einen Betrag grösser als 0 eingeben.";
+            if (nominal && amount > nominal) return "Der bestrittene Betrag kann nicht grösser sein als die Forderung.";
+            return "";
+          }
+        },
+        confirmLabel: "Streitfall eröffnen",
+        danger: true
+      });
+      if (typed == null) return;
       act(
         () =>
           api(`/receivables/${id}/disputes`, {
             method: "POST",
-            body: JSON.stringify({ disputed_amount: String(typed).trim(), resolve_case_id: `resolve-${asset.invoice_id}` })
-          }),
-        "Streitfall eröffnen? Ein unbelasteter Verkauf ist danach nicht möglich."
+            body: JSON.stringify({ disputed_amount: String(typed).replace(/'/g, ""), resolve_case_id: `resolve-${asset.invoice_id}` })
+          })
       );
     });
   }
@@ -1491,12 +1588,17 @@ function wechselHtml(data) {
 }
 
 function readWechselForm(form) {
-  return Object.fromEntries(new FormData(form).entries());
+  const data = Object.fromEntries(new FormData(form).entries());
+  // Datumsfelder sind TT.MM.JJJJ-Textfelder (SPO-09); API und Vorschau rechnen mit YYYY-MM-DD.
+  for (const key of ["issue_date", "maturity_date"]) {
+    if (key in data) data[key] = chDateToIso(data[key]) || "";
+  }
+  return data;
 }
 
 function renderWechsel() {
-  const today = new Date().toISOString().slice(0, 10);
-  const due = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
+  const today = localIsoDate();
+  const due = localIsoDate(90);
   const drawerDefault = preferredCompany();
   const initial = {
     wechsel_form: "GEZOGEN",
@@ -1532,13 +1634,13 @@ function renderWechsel() {
               <option value="NACHSICHTWECHSEL">Nachsichtwechsel</option>
             </select>
           </label>
-          <label id="wb-sight-days">Tage nach Sicht <input name="after_sight_days" inputmode="numeric" value="30" /></label>
+          <label id="wb-sight-days" hidden>Tage nach Sicht <input name="after_sight_days" inputmode="numeric" value="30" /></label>
           <label>Aussteller <select name="drawer_party_id" required>${partyOptions(drawerDefault, { customers: false })}</select></label>
           <label id="wb-drawee-label">Bezogener <select name="drawee_party_id" required>${partyOptions("", { companies: false })}</select></label>
           <label>Zahlungsempfänger <select name="remittee_party_id">${partyOptions("", { emptyLabel: "gleich Aussteller" })}</select></label>
           <label>Betrag <input name="amount" inputmode="decimal" required placeholder="0.00" /></label>
-          <label>Ausstellung <input name="issue_date" type="date" value="${initial.issue_date}" /></label>
-          <label id="wb-maturity-label">Verfall <input name="maturity_date" type="date" value="${initial.maturity_date}" /></label>
+          <label>Ausstellung <input name="issue_date" inputmode="numeric" placeholder="TT.MM.JJJJ" autocomplete="off" value="${formatDate(initial.issue_date)}" /></label>
+          <label id="wb-maturity-label">Verfall <input name="maturity_date" inputmode="numeric" placeholder="TT.MM.JJJJ" autocomplete="off" value="${formatDate(initial.maturity_date)}" /></label>
           <label>Zahlungsort <input name="place_of_payment" value="Zürich" placeholder="z. B. Zürich" /></label>
           ${stammdatenHint()}
           <button type="submit">Beleg speichern</button>
@@ -1604,8 +1706,14 @@ function renderWechsel() {
   form.addEventListener("input", refresh);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
+    const data = readWechselForm(form);
+    if (!data.issue_date || (data.verfall_art !== "SICHTWECHSEL" && !data.maturity_date)) {
+      lastError = "Bitte Ausstellung und Verfall als TT.MM.JJJJ eingeben.";
+      showNotice(lastError);
+      return;
+    }
     act(async () => {
-      const created = await api("/wechsel-drafts", { method: "POST", body: JSON.stringify(readWechselForm(form)) });
+      const created = await api("/wechsel-drafts", { method: "POST", body: JSON.stringify(data) });
       window.location.hash = `#/wechsel/${created.draft.instrument_id}`;
     });
   });
@@ -2476,7 +2584,8 @@ async function renderDisputeDossier(id) {
           <label>Hinweis an die KI
             <textarea name="instruction" id="form-instruction" rows="3" placeholder="z. B. Frist 10 Tage, nur unbestrittener Teil"></textarea>
           </label>
-          <label class="check"><input type="checkbox" name="use_ai" id="form-use-ai" ${pack.form_ai?.enabled ? "checked" : ""} ${pack.form_ai?.enabled ? "" : "disabled"} /> KI-Entwurf über OpenAI</label>
+          <label class="check"><input type="checkbox" name="use_ai" id="form-use-ai" ${pack.form_ai?.enabled ? "" : "disabled"} /> KI-Entwurf über OpenAI</label>
+          <p class="muted">Mit KI-Entwurf gehen Schuldnerin, Beträge, Gerichtsstand und Fristen an OpenAI (USA). Ohne Häkchen entsteht der Entwurf aus der Vorlage, ohne Datenweitergabe.</p>
           <div class="actions">
             <button class="btn" id="form-gen-btn" type="button">Entwurf erzeugen</button>
           </div>
@@ -3268,12 +3377,20 @@ async function renderLombard() {
       const security = byCode.get(row.loan_security);
       return security ? sum + row.qty * security.price * (1 - security.haircut / 100) : sum;
     }, 0);
+  const submit = form.querySelector("button[type=submit]");
   const update = () => {
+    let invalid = false;
     for (const row of rows()) {
       const { loan_security, qty } = rowPledge(row);
       const security = byCode.get(loan_security);
       const target = row.querySelector('[data-field="value"]');
-      if (qty > 0 && !security) {
+      const typed = row.querySelector('[data-field="qty"]').value.trim();
+      if (typed && !(qty > 0)) {
+        invalid = true;
+        target.textContent = "Menge muss grösser als 0 sein.";
+        target.className = "error";
+      } else if (qty > 0 && !security) {
+        invalid = true;
         target.textContent = "Sicherheit wählen";
         target.className = "error";
       } else if (qty > 0) {
@@ -3289,6 +3406,7 @@ async function renderLombard() {
     const target = document.getElementById("lombard-value");
     target.textContent = `Belehnungswert nach Abschlag (total): ${formatChf(value)}${amount > value ? " — Betrag zu hoch" : ""}`;
     target.className = amount > value && amount > 0 ? "error" : "muted";
+    if (submit) submit.disabled = invalid || !(amount > 0) || amount > value || !pledgesOf().length;
   };
   form.addEventListener("input", update);
   form.addEventListener("change", update);
@@ -3303,8 +3421,10 @@ async function renderLombard() {
     remove.closest(".lombard-row").remove();
     update();
   });
+  update();
   form.addEventListener("submit", (event) => {
     event.preventDefault();
+    if (submit?.disabled) return;
     const pledges = pledgesOf();
     const amount = String(form.elements.amount.value).replace(/'/g, "");
     const customer = form.elements.customer_id.value;
