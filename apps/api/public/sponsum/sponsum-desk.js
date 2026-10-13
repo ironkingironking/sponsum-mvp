@@ -1098,6 +1098,7 @@ function renderHub() {
   main.innerHTML = `
     <h1>Sponsum</h1>
     <p class="lead">Einstieg ist die <strong>Forderung aus der Rechnung</strong> — nicht der Wechsel. Verifizieren, finanzieren, zedieren. Sponsum hält keine Kundengelder.</p>
+    <p class="lead"><span class="badge warn"><span class="badge-sym" aria-hidden="true">▲</span> Testbetrieb</span> Sponsum ist noch nicht live. Forderungen, Angebote und Abschlüsse hier sind Testdaten; es wird nichts finanziert oder ausgezahlt.</p>
     <div class="kpis">
       <div class="kpi"><strong>${k.receivables}</strong><span>Forderungen</span></div>
       <div class="kpi"><strong>${k.live_offers}</strong><span>Offene Angebote</span></div>
