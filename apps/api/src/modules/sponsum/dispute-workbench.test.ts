@@ -242,7 +242,7 @@ test("letters use the holder's seat, never a fixed Zürich (SPO-06)", () => {
         id: "seller-1",
         name: "Movena GmbH",
         kind: "company",
-        address: "Fassbindstrasse 6, 4310 Rheinfelden",
+        address: "Fassbindstrasse 10, 4310 Rheinfelden",
         city: "Rheinfelden",
         country: "Schweiz"
       }
@@ -250,7 +250,7 @@ test("letters use the holder's seat, never a fixed Zürich (SPO-06)", () => {
     "2026-08-17T10:00:00.000Z"
   );
   assert.ok(lines.includes("Rheinfelden, 17.08.2026"));
-  assert.ok(lines.includes("Fassbindstrasse 6, 4310 Rheinfelden"));
+  assert.ok(lines.includes("Fassbindstrasse 10, 4310 Rheinfelden"));
   assert.ok(!lines.some((line) => /Zürich/.test(line)));
   const unknownSeat = renderFormLines("mahnung", { ...base, holder: { id: "x", name: "Movena GmbH", kind: "company" } }, "2026-08-17T10:00:00.000Z");
   assert.ok(unknownSeat.includes("17.08.2026"));

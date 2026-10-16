@@ -3279,7 +3279,7 @@ function partyCardsForVenue(state: ReturnType<MemorySponsumStore["snapshot"]>): 
   return [...local.companies, ...local.customers];
 }
 
-const MOVENA_SEAT = { address: "Fassbindstrasse 6, 4310 Rheinfelden", city: "Rheinfelden", country: "Schweiz" };
+const MOVENA_SEAT = { address: "Fassbindstrasse 10, 4310 Rheinfelden", city: "Rheinfelden", country: "Schweiz" };
 
 const DEMO_PARTY_GEO: Record<string, Pick<PartyRow, "name" | "city" | "country" | "kind" | "address">> = {
   "debtor-nord": { name: "Nordholz AG", city: "Winterthur", country: "Schweiz", kind: "customer" },
